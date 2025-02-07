@@ -23,7 +23,7 @@ local function createResultText(highlightedText, message_history)
     if message_history[i].role == "user" then
       result_text = result_text .. _("User: ") .. message_history[i].content .. "\n\n"
     else
-      result_text = result_text .. _("ChatGPT: ") .. message_history[i].content .. "\n\n"
+      result_text = result_text .. _("Assistant: ") .. message_history[i].content .. "\n\n"
     end
   end
 
@@ -134,7 +134,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
   if CONFIGURATION and CONFIGURATION.features and CONFIGURATION.features.custom_prompts then
     for prompt_name, prompt in pairs(CONFIGURATION.features.custom_prompts) do
       if prompt_name ~= "system" and type(prompt) == "string" then  -- Ensure prompt is valid
-        if prompt_name ~= "translation" then
+        if not prompt:lower():find("translate") then
           prompt = prompt .. " Detect the language and answer using that language."
         end
         table.insert(buttons, {

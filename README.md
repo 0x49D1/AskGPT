@@ -54,7 +54,7 @@ local CONFIGURATION = {
     base_url = "https://api.openai.com/v1/chat/completions",
     features = {
         custom_prompts = {
-            translation = "Please translate the following text to French with definition."
+            translate = "Please translate the following text to French with definition."
         }
     }
 }
