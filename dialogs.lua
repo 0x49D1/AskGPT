@@ -66,6 +66,28 @@ local function showLoadingDialog()
   UIManager:show(loading)
 end
 
+local function detectLanguage(text)
+  -- Implement a simple language detection mechanism
+  -- For demonstration purposes, we'll use a basic heuristic for popular languages
+  local language_patterns = {
+    en = "[a-zA-Z]", -- English
+    fr = "[éèêëàâîïôûùç]", -- French
+    es = "[áéíóúñ]", -- Spanish
+    de = "[äöüß]", -- German
+    ru = "[А-Яа-я]", -- Russian
+    zh = "[\x{4E00}-\x{9FFF}]", -- Chinese
+  }
+
+  for lang, pattern in pairs(language_patterns) do
+    if text:match(pattern) then
+      return lang
+    end
+  end
+
+  -- Default to English if no pattern matches
+  return "en"
+end
+
 local function showChatGPTDialog(ui, highlightedText, message_history)
   if not highlightedText or highlightedText == "" then
     UIManager:show(InfoMessage:new{
@@ -77,7 +99,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
   local title, author, lang =
     ui.document:getProps().title or _("Unknown Title"),
     ui.document:getProps().authors or _("Unknown Author"),
-    ui.document:getProps().language or "en"
+    ui.document:getProps().language or detectLanguage(highlightedText)
 
   local default_prompt = "The following is a conversation with an AI assistant. The assistant is helpful, creative, clever, and very friendly. Answer as concisely as possible."
   local system_prompt = CONFIGURATION 
