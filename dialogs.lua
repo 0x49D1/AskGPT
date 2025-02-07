@@ -16,34 +16,6 @@ else
   print("configuration.lua not found, skipping...")
 end
 
-local function translateText(text)
-  if not text or text == "" then
-    return _("Error: No text provided for translation")
-  end
-
-  local translation_prompt = CONFIGURATION 
-    and CONFIGURATION.features 
-    and CONFIGURATION.features.custom_prompts 
-    and CONFIGURATION.features.custom_prompts.translation
-
-  if not translation_prompt then
-    return _("Error: No translation prompt configured")
-  end
-
-  local translation_message = {
-    role = "user",
-    content = "For the following text:\n\n\"" .. text .. "\"\n\n. Provide an accurate translation to English with phonetics and use cases in the translated version."
-  }
-  local translation_history = {
-    {
-      role = "system",
-      content = translation_prompt
-    },
-    translation_message
-  }
-  return queryChatGPT(translation_history)
-end
-
 local function createResultText(highlightedText, message_history)
   local result_text = _("Highlighted text: ") .. "\"" .. highlightedText .. "\"\n\n"
 
@@ -66,28 +38,6 @@ local function showLoadingDialog()
   UIManager:show(loading)
 end
 
-local function detectLanguage(text)
-  -- Implement a simple language detection mechanism
-  -- For demonstration purposes, we'll use a basic heuristic for popular languages
-  local language_patterns = {
-    en = "[a-zA-Z]", -- English
-    fr = "[éèêëàâîïôûùç]", -- French
-    es = "[áéíóúñ]", -- Spanish
-    de = "[äöüß]", -- German
-    ru = "[А-Яа-я]", -- Russian
-    zh = "[\x{4E00}-\x{9FFF}]", -- Chinese
-  }
-
-  for lang, pattern in pairs(language_patterns) do
-    if text:match(pattern) then
-      return lang
-    end
-  end
-
-  -- Default to English if no pattern matches
-  return "en"
-end
-
 local function showChatGPTDialog(ui, highlightedText, message_history)
   if not highlightedText or highlightedText == "" then
     UIManager:show(InfoMessage:new{
@@ -96,20 +46,16 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     return
   end
 
-  local title, author, lang =
+  local title, author =
     ui.document:getProps().title or _("Unknown Title"),
-    ui.document:getProps().authors or _("Unknown Author"),
-    ui.document:getProps().language or detectLanguage(highlightedText)
+    ui.document:getProps().authors or _("Unknown Author")
 
-  local default_prompt = "The following is a conversation with an AI assistant. The assistant is helpful, creative, clever, and very friendly. Answer as concisely as possible."
+  local default_prompt = "The following is a conversation with an AI assistant. The assistant is helpful, creative, clever, and very friendly. Answer as concisely as possible. Detect the language and answer using that language."
   local system_prompt = CONFIGURATION 
     and CONFIGURATION.features 
     and CONFIGURATION.features.custom_prompts 
     and CONFIGURATION.features.custom_prompts.system
     or default_prompt
-
-  -- Append language information to the system prompt
-  system_prompt = system_prompt .. " Answer in " .. lang .. "."
 
   local message_history = message_history or { {
     role = "system",
@@ -188,6 +134,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
   if CONFIGURATION and CONFIGURATION.features and CONFIGURATION.features.custom_prompts then
     for prompt_name, prompt in pairs(CONFIGURATION.features.custom_prompts) do
       if prompt_name ~= "system" and type(prompt) == "string" then  -- Ensure prompt is valid
+        if prompt_name ~= "translation" then
+          prompt = prompt .. " Detect the language and answer using that language."
+        end
         table.insert(buttons, {
           text = _(prompt_name:gsub("^%l", string.upper)),  -- Capitalize first letter
           callback = function()
@@ -240,7 +189,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     title = _("Ask a question about the highlighted text"),
     input_hint = _("Type your question here..."),
     input_type = "text",
-    buttons = {buttons}
+    buttons = { buttons }
   }
   UIManager:show(input_dialog)
 end
