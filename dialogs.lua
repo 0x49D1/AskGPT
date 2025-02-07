@@ -25,11 +25,14 @@ local function translateText(text)
     and CONFIGURATION.features 
     and CONFIGURATION.features.custom_prompts 
     and CONFIGURATION.features.custom_prompts.translation
-    or "You are a skilled translator and language expert. First explain the meaning of the text in the original language, then provide an accurate translation to English."
+
+  if not translation_prompt then
+    return _("Error: No translation prompt configured")
+  end
 
   local translation_message = {
     role = "user",
-    content = "For the following text:\n\n\"" .. text .. "\"\n\n1. First explain what this means/expresses in the original language\n2. Then translate it as specified in your instructions"
+    content = "For the following text:\n\n\"" .. text .. "\"\n\n. Provide an accurate translation to English with phonetics and use cases in the translated version."
   }
   local translation_history = {
     {
@@ -71,10 +74,11 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     return
   end
 
-  local title, author =
+  local title, author, lang =
     ui.document:getProps().title or _("Unknown Title"),
-    ui.document:getProps().authors or _("Unknown Author")
-  
+    ui.document:getProps().authors or _("Unknown Author"),
+    ui.document:getProps().language or "en"
+
   local default_prompt = "The following is a conversation with an AI assistant. The assistant is helpful, creative, clever, and very friendly. Answer as concisely as possible."
   local system_prompt = CONFIGURATION 
     and CONFIGURATION.features 
@@ -82,10 +86,13 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     and CONFIGURATION.features.custom_prompts.system
     or default_prompt
 
-  local message_history = message_history or {{
+  -- Append language information to the system prompt
+  system_prompt = system_prompt .. " Answer in " .. lang .. "."
+
+  local message_history = message_history or { {
     role = "system",
     content = system_prompt
-  }}
+  } }
 
   local function handleNewQuestion(chatgpt_viewer, question)
     table.insert(message_history, {
