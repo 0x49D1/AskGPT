@@ -16,6 +16,22 @@ else
   print("configuration.lua not found, skipping...")
 end
 
+-- Helper function to check if a feature is enabled
+local function isFeatureEnabled(feature_name, default)
+  -- Always default to true if not specified
+  default = default == nil and true or default
+  
+  if not CONFIGURATION or not CONFIGURATION.features or not CONFIGURATION.features.advanced_features then
+    return default -- Return default value if configuration doesn't exist
+  end
+  
+  if CONFIGURATION.features.advanced_features[feature_name] == nil then
+    return default -- Return default if not specified
+  end
+  
+  return CONFIGURATION.features.advanced_features[feature_name]
+end
+
 local function createResultText(highlightedText, message_history)
   local result_text = _("Highlighted text: ") .. "\"" .. highlightedText .. "\"\n\n"
 
@@ -152,7 +168,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             model = model,
             temperature = temperature,
             max_tokens = max_tokens,
-            system_prompt = system_prompt
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
           }
 
           UIManager:show(chatgpt_viewer)
@@ -214,7 +232,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
                 model = model,
                 temperature = temperature,
                 max_tokens = max_tokens,
-                system_prompt = prompt
+                system_prompt = prompt,
+                book_title = title,
+                book_author = author
               }
 
               UIManager:show(chatgpt_viewer)
@@ -223,6 +243,190 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
         })
       end
     end
+  end
+
+  -- Add Book Analysis button
+  if isFeatureEnabled("book_analysis", true) then
+    table.insert(buttons, {
+      text = _("Book Analysis"),
+      callback = function()
+        UIManager:close(input_dialog)
+        
+        -- Show loading indicator
+        local loading = InfoMessage:new{
+          text = _("Analyzing book..."),
+          timeout = 0 -- No timeout, we'll close it manually
+        }
+        UIManager:show(loading)
+        
+        -- Use pcall to handle errors
+        local success, err = pcall(function()
+          -- Create a ChatGPTViewer instance to use its analyzeBook method
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = _("Book Analysis"),
+            text = "",
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
+          }
+          
+          chatgpt_viewer:analyzeBook()
+        end)
+        
+        -- Close loading indicator
+        UIManager:close(loading)
+        
+        -- Show error if failed
+        if not success then
+          UIManager:show(InfoMessage:new{
+            text = _("Error: ") .. tostring(err),
+            timeout = 3
+          })
+        end
+      end
+    })
+  end
+
+  -- Add Characters & Plot button
+  if isFeatureEnabled("characters_plot", true) then
+    table.insert(buttons, {
+      text = _("Characters & Plot"),
+      callback = function()
+        UIManager:close(input_dialog)
+        
+        -- Show loading indicator
+        local loading = InfoMessage:new{
+          text = _("Analyzing characters and plot..."),
+          timeout = 0 -- No timeout, we'll close it manually
+        }
+        UIManager:show(loading)
+        
+        -- Use pcall to handle errors
+        local success, err = pcall(function()
+          -- Create a ChatGPTViewer instance to use its trackCharactersAndPlot method
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = _("Characters & Plot"),
+            text = "",
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
+          }
+          
+          chatgpt_viewer:trackCharactersAndPlot()
+        end)
+        
+        -- Close loading indicator
+        UIManager:close(loading)
+        
+        -- Show error if failed
+        if not success then
+          UIManager:show(InfoMessage:new{
+            text = _("Error: ") .. tostring(err),
+            timeout = 3
+          })
+        end
+      end
+    })
+  end
+
+  -- Add Discussion button
+  if isFeatureEnabled("discussion", true) then
+    table.insert(buttons, {
+      text = _("Discussion"),
+      callback = function()
+        UIManager:close(input_dialog)
+        
+        -- Show loading indicator
+        local loading = InfoMessage:new{
+          text = _("Generating discussion questions..."),
+          timeout = 0 -- No timeout, we'll close it manually
+        }
+        UIManager:show(loading)
+        
+        -- Use pcall to handle errors
+        local success, err = pcall(function()
+          -- Create a ChatGPTViewer instance to use its generateDiscussionQuestions method
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = _("Discussion"),
+            text = "",
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
+          }
+          
+          chatgpt_viewer:generateDiscussionQuestions()
+        end)
+        
+        -- Close loading indicator
+        UIManager:close(loading)
+        
+        -- Show error if failed
+        if not success then
+          UIManager:show(InfoMessage:new{
+            text = _("Error: ") .. tostring(err),
+            timeout = 3
+          })
+        end
+      end
+    })
+  end
+
+  -- Add Recommendations button
+  if isFeatureEnabled("recommendations", true) then
+    table.insert(buttons, {
+      text = _("Recommendations"),
+      callback = function()
+        UIManager:close(input_dialog)
+        
+        -- Show loading indicator
+        local loading = InfoMessage:new{
+          text = _("Finding book recommendations..."),
+          timeout = 0 -- No timeout, we'll close it manually
+        }
+        UIManager:show(loading)
+        
+        -- Use pcall to handle errors
+        local success, err = pcall(function()
+          -- Create a ChatGPTViewer instance to use its getBookRecommendations method
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = _("Recommendations"),
+            text = "",
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
+          }
+          
+          chatgpt_viewer:getBookRecommendations()
+        end)
+        
+        -- Close loading indicator
+        UIManager:close(loading)
+        
+        -- Show error if failed
+        if not success then
+          UIManager:show(InfoMessage:new{
+            text = _("Error: ") .. tostring(err),
+            timeout = 3
+          })
+        end
+      end
+    })
   end
 
   input_dialog = InputDialog:new{

@@ -82,6 +82,28 @@ local CONFIGURATION = {
 
 Will generate buttons labeled "Summarize" and "Translate" in the interface.
 
+## Advanced Features
+
+AskGPT now includes several advanced features to enhance your reading experience:
+
+1. **Book Analysis**: Get insights about themes, writing style, and historical context.
+2. **Characters & Plot**: Track characters, their relationships, and key plot points.
+3. **Book Club Discussion Questions**: Generate thought-provoking questions for discussion.
+4. **Book Recommendations**: Get personalized book recommendations based on what you're reading.
+
+All these features are enabled by default but can be configured in the Settings dialog or in your configuration.lua file:
+
+```lua
+features = {
+    advanced_features = {
+        book_analysis = true,
+        characters_plot = true,
+        discussion = true,
+        recommendations = true
+    }
+}
+```
+
 ## Installation
 
 If you clone this project, you should be able to put the directory, `askgpt.koplugin`, in the `koreader/plugins` directory and it should work. If you want to use the plugin without cloning the project, you can download the zip file from the releases page and extract the `askgpt.koplugin` directory to the `koreader/plugins` directory. If for some reason you extract the files of this repository in another directory, rename it before moving it to the `koreader/plugins` directory.
@@ -95,3 +117,7 @@ I hope you enjoy using this plugin and that it enhances your e-reading experienc
 If you want to support development, become a [Sponsor on GitHub](https://github.com/sponsors/drewbaumann).
 
 License: GPLv3
+
+## Updates
+
+To check for updates to AskGPT, visit the [GitHub releases page](https://github.com/drewbaumann/AskGPT/releases). If a new version is available, download it and replace your existing askgpt.koplugin folder in the koreader/plugins directory.

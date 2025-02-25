@@ -33,6 +33,41 @@ local util = require("util")
 local _ = require("gettext")
 local Screen = Device.screen
 
+-- Import queryChatGPT function and configuration
+local queryChatGPT = nil
+local CONFIGURATION = nil
+
+local success, result = pcall(function() return require("gpt_query") end)
+if success then
+  queryChatGPT = result
+else
+  print("gpt_query.lua not found, advanced features will be disabled")
+end
+
+-- Try to load configuration
+success, result = pcall(function() return require("configuration") end)
+if success then
+  CONFIGURATION = result
+else
+  print("configuration.lua not found, using default settings")
+end
+
+-- Helper function to check if a feature is enabled
+local function isFeatureEnabled(feature_name, default)
+  -- Always default to true if not specified
+  default = default == nil and true or default
+  
+  if not CONFIGURATION or not CONFIGURATION.features or not CONFIGURATION.features.advanced_features then
+    return default -- Return default value if configuration doesn't exist
+  end
+  
+  if CONFIGURATION.features.advanced_features[feature_name] == nil then
+    return default -- Return default if not specified
+  end
+  
+  return CONFIGURATION.features.advanced_features[feature_name]
+end
+
 local ChatGPTViewer = InputContainer:extend {
   title = nil,
   text = nil,
@@ -71,6 +106,8 @@ local ChatGPTViewer = InputContainer:extend {
   temperature = 0.7, -- Default temperature
   max_tokens = 1024, -- Default max tokens
   system_prompt = "You are a helpful assistant.", -- Default system prompt
+  book_title = nil,
+  book_author = nil,
 }
 
 function ChatGPTViewer:init()
@@ -203,46 +240,100 @@ function ChatGPTViewer:init()
         self:askAnotherQuestion()
       end,
     },
-    {
-      text = _("Settings"),
-      id = "settings",
-      callback = function()
-        self:showSettings()
-      end,
-    },
-    {
-      text = _("Export"),
-      id = "export",
-      callback = function()
-        self:exportConversation()
-      end,
-    },
-    {
-      text = "⇱",
-      id = "top",
-      callback = function()
-        self.scroll_text_w:scrollToTop()
-      end,
-      hold_callback = self.default_hold_callback,
-      allow_hold_when_disabled = true,
-    },
-    {
-      text = "⇲",
-      id = "bottom",
-      callback = function()
-        self.scroll_text_w:scrollToBottom()
-      end,
-      hold_callback = self.default_hold_callback,
-      allow_hold_when_disabled = true,
-    },
-    {
-      text = _("Close"),
-      callback = function()
-        self:onClose()
-      end,
-      hold_callback = self.default_hold_callback,
-    },
   }
+
+  -- Add book-related features to the main menu instead of a separate section
+  if queryChatGPT then
+    -- Book Analysis
+    if isFeatureEnabled("book_analysis", true) then
+      table.insert(default_buttons, {
+        text = _("Book Analysis"),
+        id = "book_analysis",
+        callback = function()
+          self:analyzeBook()
+        end,
+      })
+    end
+    
+    -- Characters & Plot
+    if isFeatureEnabled("characters_plot", true) then
+      table.insert(default_buttons, {
+        text = _("Characters & Plot"),
+        id = "characters_plot",
+        callback = function()
+          self:trackCharactersAndPlot()
+        end,
+      })
+    end
+    
+    -- Discussion Questions
+    if isFeatureEnabled("discussion", true) then
+      table.insert(default_buttons, {
+        text = _("Discussion"),
+        id = "discussion",
+        callback = function()
+          self:generateDiscussionQuestions()
+        end,
+      })
+    end
+    
+    -- Recommendations
+    if isFeatureEnabled("recommendations", true) then
+      table.insert(default_buttons, {
+        text = _("Recommendations"),
+        id = "recommendations",
+        callback = function()
+          self:getBookRecommendations()
+        end,
+      })
+    end
+  end
+
+  -- Always add these basic buttons
+  table.insert(default_buttons, {
+    text = _("Settings"),
+    id = "settings",
+    callback = function()
+      self:showSettings()
+    end,
+  })
+
+  table.insert(default_buttons, {
+    text = _("Export"),
+    id = "export",
+    callback = function()
+      self:exportConversation()
+    end,
+  })
+
+  table.insert(default_buttons, {
+    text = "⇱",
+    id = "top",
+    callback = function()
+      self.scroll_text_w:scrollToTop()
+    end,
+    hold_callback = self.default_hold_callback,
+    allow_hold_when_disabled = true,
+  })
+
+  table.insert(default_buttons, {
+    text = "⇲",
+    id = "bottom",
+    callback = function()
+      self.scroll_text_w:scrollToBottom()
+    end,
+    hold_callback = self.default_hold_callback,
+    allow_hold_when_disabled = true,
+  })
+
+  table.insert(default_buttons, {
+    text = _("Close"),
+    callback = function()
+      self:onClose()
+    end,
+    hold_callback = self.default_hold_callback,
+  })
+
   local buttons = self.buttons_table or {}
   if self.add_default_buttons or not self.buttons_table then
     table.insert(buttons, default_buttons)
@@ -359,6 +450,60 @@ end
 
 function ChatGPTViewer:showSettings()
   local MultiInputDialog = require("ui/widget/multiinputdialog")
+  local CheckButton = require("ui/widget/checkbutton")
+  local VerticalGroup = require("ui/widget/verticalgroup")
+  local VerticalSpan = require("ui/widget/verticalspan")
+  local HorizontalGroup = require("ui/widget/horizontalgroup")
+  local FrameContainer = require("ui/widget/container/framecontainer")
+  local TextBoxWidget = require("ui/widget/textboxwidget")
+  local Size = require("ui/size")
+  local Font = require("ui/font")
+  
+  -- Get current feature settings
+  local book_analysis_enabled = isFeatureEnabled("book_analysis", true)
+  local characters_plot_enabled = isFeatureEnabled("characters_plot", true)
+  local discussion_enabled = isFeatureEnabled("discussion", true)
+  local recommendations_enabled = isFeatureEnabled("recommendations", true)
+  
+  -- Create checkboxes for features
+  local book_analysis_checkbox = CheckButton:new{
+    text = _("Book Analysis"),
+    checked = book_analysis_enabled,
+    callback = function() book_analysis_enabled = not book_analysis_enabled end,
+  }
+  
+  local characters_plot_checkbox = CheckButton:new{
+    text = _("Characters & Plot"),
+    checked = characters_plot_enabled,
+    callback = function() characters_plot_enabled = not characters_plot_enabled end,
+  }
+  
+  local discussion_checkbox = CheckButton:new{
+    text = _("Discussion"),
+    checked = discussion_enabled,
+    callback = function() discussion_enabled = not discussion_enabled end,
+  }
+  
+  local recommendations_checkbox = CheckButton:new{
+    text = _("Recommendations"),
+    checked = recommendations_enabled,
+    callback = function() recommendations_enabled = not recommendations_enabled end,
+  }
+  
+  -- Create feature settings group
+  local feature_settings = VerticalGroup:new{
+    TextBoxWidget:new{
+      text = _("Enable/Disable Features:"),
+      face = Font:getFace("smallinfofont"),
+      width = self.width * 0.8,
+    },
+    VerticalSpan:new{ width = Size.span.vertical_small },
+    book_analysis_checkbox,
+    characters_plot_checkbox,
+    discussion_checkbox,
+    recommendations_checkbox,
+  }
+  
   local settings_dialog
   
   settings_dialog = MultiInputDialog:new {
@@ -385,6 +530,8 @@ function ChatGPTViewer:showSettings()
         label = _("System prompt:"),
       },
     },
+    width = self.width * 0.8,
+    height = self.height * 0.8,
     buttons = {
       {
         {
@@ -426,15 +573,79 @@ function ChatGPTViewer:showSettings()
               end
             end
             
+            -- Save feature settings
+            if CONFIGURATION then
+              if not CONFIGURATION.features then
+                CONFIGURATION.features = {}
+              end
+              if not CONFIGURATION.features.advanced_features then
+                CONFIGURATION.features.advanced_features = {}
+              end
+              
+              CONFIGURATION.features.advanced_features.book_analysis = book_analysis_enabled
+              CONFIGURATION.features.advanced_features.characters_plot = characters_plot_enabled
+              CONFIGURATION.features.advanced_features.discussion = discussion_enabled
+              CONFIGURATION.features.advanced_features.recommendations = recommendations_enabled
+              
+              -- Save configuration to file
+              local file = io.open("configuration.lua", "w")
+              if file then
+                file:write("local CONFIGURATION = {\n")
+                file:write("    api_key = \"" .. (CONFIGURATION.api_key or "") .. "\",\n")
+                file:write("    model = \"" .. (CONFIGURATION.model or "gpt-4o-mini") .. "\",\n")
+                file:write("    base_url = \"" .. (CONFIGURATION.base_url or "https://api.openai.com/v1/chat/completions") .. "\",\n")
+                file:write("    additional_parameters = {},\n")
+                file:write("    features = {\n")
+                
+                -- Write custom prompts
+                file:write("        custom_prompts = {\n")
+                if CONFIGURATION.features.custom_prompts then
+                  for name, prompt in pairs(CONFIGURATION.features.custom_prompts) do
+                    file:write("            " .. name .. " = \"" .. prompt:gsub("\"", "\\\"") .. "\",\n")
+                  end
+                end
+                file:write("        },\n")
+                
+                -- Write advanced features
+                file:write("        advanced_features = {\n")
+                file:write("            book_analysis = " .. tostring(book_analysis_enabled) .. ",\n")
+                file:write("            characters_plot = " .. tostring(characters_plot_enabled) .. ",\n")
+                file:write("            discussion = " .. tostring(discussion_enabled) .. ",\n")
+                file:write("            recommendations = " .. tostring(recommendations_enabled) .. "\n")
+                file:write("        }\n")
+                
+                file:write("    }\n")
+                file:write("}\n\n")
+                file:write("return CONFIGURATION\n")
+                file:close()
+              end
+            end
+            
             UIManager:show(Notification:new {
               text = _("Settings saved."),
             })
             UIManager:close(settings_dialog)
+            
+            -- Refresh the UI to reflect new settings
+            self:update(self.text, true)
           end,
         },
       },
     },
   }
+  
+  -- Add feature settings to dialog
+  settings_dialog[1] = VerticalGroup:new{
+    settings_dialog[1],
+    VerticalSpan:new{ width = Size.span.vertical_large },
+    FrameContainer:new{
+      padding = Size.padding.default,
+      margin = Size.margin.small,
+      bordersize = 0,
+      feature_settings,
+    }
+  }
+  
   UIManager:show(settings_dialog)
 end
 
@@ -468,9 +679,6 @@ end
 
 function ChatGPTViewer:onClose()
   UIManager:close(self)
-  if self.close_callback then
-    self.close_callback()
-  end
   return true
 end
 
@@ -579,6 +787,8 @@ function ChatGPTViewer:update(new_text, is_error)
     temperature = self.temperature,
     max_tokens = self.max_tokens,
     system_prompt = self.system_prompt,
+    book_title = self.book_title,
+    book_author = self.book_author
   }
   updated_viewer.scroll_text_w:scrollToBottom()
   UIManager:show(updated_viewer)
@@ -656,6 +866,394 @@ function ChatGPTViewer:saveConversationToFile(filename)
       text = T(_("Failed to save conversation to %1"), filename),
     })
   end
+end
+
+function ChatGPTViewer:analyzeBook()
+  if not queryChatGPT then
+    UIManager:show(Notification:new {
+      text = _("Advanced features unavailable. Check gpt_query.lua"),
+    })
+    return
+  end
+  
+  local DocumentRegistry = require("document/documentregistry")
+  local InfoMessage = require("ui/widget/infomessage")
+  local UIManager = require("ui/uimanager")
+  
+  -- Get book metadata from parent UI
+  local book_title = self.book_title or _("Unknown Title")
+  local book_author = self.book_author or _("Unknown Author")
+  
+  UIManager:show(InfoMessage:new{
+    text = _("Analyzing book content..."),
+    timeout = 2
+  })
+  
+  -- Get the language from the conversation history
+  local detected_language = self:detectLanguage()
+  
+  -- Create a prompt for book analysis
+  local analysis_prompt = {
+    role = "system",
+    content = "You are a literary analyst. Provide insights about themes, writing style, and historical context. " ..
+              "Respond in the same language as the user's text. If the text is in a non-English language, provide your response in that language."
+  }
+  
+  local book_context = {
+    role = "user",
+    content = string.format("I'm reading '%s' by %s. Based on the excerpts I've shared with you so far, can you provide analysis of themes, writing style, and historical context?", 
+      book_title, book_author)
+  }
+  
+  -- Use existing conversation history to inform analysis
+  local analysis_messages = {analysis_prompt, book_context}
+  
+  -- Add relevant parts of conversation history that contain book excerpts
+  for _, msg in ipairs(self.conversation_history) do
+    if msg.role == "user" and msg.content:match("highlighted text") then
+      table.insert(analysis_messages, msg)
+    end
+  end
+  
+  -- Add language instruction if detected
+  if detected_language and detected_language ~= "english" then
+    table.insert(analysis_messages, {
+      role = "user",
+      content = "Please respond in " .. detected_language .. " language."
+    })
+  end
+  
+  -- Query ChatGPT for analysis with error handling
+  local success, analysis = pcall(queryChatGPT, analysis_messages, {
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens
+  })
+  
+  if not success then
+    UIManager:show(InfoMessage:new{
+      text = _("Error: Failed to get analysis from ChatGPT"),
+      timeout = 3
+    })
+    return
+  end
+  
+  -- Show analysis in a new viewer
+  local analysis_viewer = ChatGPTViewer:new {
+    title = _("Book Analysis"),
+    text = analysis,
+    width = self.width,
+    height = self.height,
+    conversation_history = self.conversation_history,
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens,
+    system_prompt = self.system_prompt,
+    book_title = book_title,
+    book_author = book_author
+  }
+  
+  UIManager:show(analysis_viewer)
+end
+
+function ChatGPTViewer:trackCharactersAndPlot()
+  if not queryChatGPT then
+    UIManager:show(Notification:new {
+      text = _("Advanced features unavailable. Check gpt_query.lua"),
+    })
+    return
+  end
+  
+  local UIManager = require("ui/uimanager")
+  local InfoMessage = require("ui/widget/infomessage")
+  
+  UIManager:show(InfoMessage:new{
+    text = _("Analyzing characters and plot..."),
+    timeout = 2
+  })
+  
+  -- Get the language from the conversation history
+  local detected_language = self:detectLanguage()
+  
+  -- Create a prompt for character and plot tracking
+  local tracking_prompt = {
+    role = "system",
+    content = "You are a literary assistant specializing in character and plot analysis. " ..
+              "For the book excerpts provided, create a detailed analysis with these sections: " ..
+              "1. CHARACTERS: List all characters mentioned with brief descriptions and their relationships to others. " ..
+              "2. PLOT SUMMARY: Summarize the key events and plot points revealed so far. " ..
+              "3. TIMELINE: Create a chronological sequence of events if possible. " ..
+              "4. THEMES & MOTIFS: Identify recurring themes or motifs. " ..
+              "Format your response with clear headings and bullet points for readability. " ..
+              "Respond in the same language as the user's text. If the text is in a non-English language, provide your response in that language."
+  }
+  
+  local book_context = {
+    role = "user",
+    content = string.format("I'm reading '%s' by %s. Based on the excerpts I've shared with you, can you track the characters and plot developments so far?", 
+      self.book_title or _("Unknown Title"), 
+      self.book_author or _("Unknown Author"))
+  }
+  
+  -- Use existing conversation history to inform tracking
+  local tracking_messages = {tracking_prompt, book_context}
+  
+  -- Add relevant parts of conversation history that contain book excerpts
+  for _, msg in ipairs(self.conversation_history) do
+    if msg.role == "user" and msg.content:match("highlighted text") then
+      table.insert(tracking_messages, msg)
+    end
+  end
+  
+  -- Add language instruction if detected
+  if detected_language and detected_language ~= "english" then
+    table.insert(tracking_messages, {
+      role = "user",
+      content = "Please respond in " .. detected_language .. " language."
+    })
+  end
+  
+  -- Query ChatGPT for character and plot tracking with error handling
+  local success, tracking_result = pcall(queryChatGPT, tracking_messages, {
+    model = self.model,
+    temperature = 0.7,
+    max_tokens = self.max_tokens
+  })
+  
+  if not success then
+    UIManager:show(InfoMessage:new{
+      text = _("Error: Failed to get character and plot analysis from ChatGPT"),
+      timeout = 3
+    })
+    return
+  end
+  
+  -- Show tracking in a new viewer
+  local tracking_viewer = ChatGPTViewer:new {
+    title = _("Characters & Plot"),
+    text = tracking_result,
+    width = self.width,
+    height = self.height,
+    conversation_history = self.conversation_history,
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens,
+    system_prompt = self.system_prompt,
+    book_title = self.book_title,
+    book_author = self.book_author
+  }
+  
+  UIManager:show(tracking_viewer)
+end
+
+function ChatGPTViewer:generateDiscussionQuestions()
+  if not queryChatGPT then
+    UIManager:show(Notification:new {
+      text = _("Advanced features unavailable. Check gpt_query.lua"),
+    })
+    return
+  end
+  
+  local UIManager = require("ui/uimanager")
+  local InfoMessage = require("ui/widget/infomessage")
+  
+  -- Get the language from the conversation history
+  local detected_language = self:detectLanguage()
+  
+  -- Create a prompt for discussion questions
+  local discussion_prompt = {
+    role = "system",
+    content = "You are a book club facilitator. Generate thought-provoking discussion questions about themes, characters, plot, writing style, and societal implications based on the book excerpts shared. " ..
+              "Respond in the same language as the user's text. If the text is in a non-English language, provide your response in that language."
+  }
+  
+  local book_context = {
+    role = "user",
+    content = string.format("I'm reading '%s' by %s for my book club. Based on the excerpts I've shared with you, can you generate 10 discussion questions that would lead to interesting conversations?", 
+      self.book_title or _("Unknown Title"), 
+      self.book_author or _("Unknown Author"))
+  }
+  
+  -- Use existing conversation history to inform discussion questions
+  local discussion_messages = {discussion_prompt, book_context}
+  
+  -- Add relevant parts of conversation history that contain book excerpts
+  for _, msg in ipairs(self.conversation_history) do
+    if msg.role == "user" and msg.content:match("highlighted text") then
+      table.insert(discussion_messages, msg)
+    end
+  end
+  
+  -- Add language instruction if detected
+  if detected_language and detected_language ~= "english" then
+    table.insert(discussion_messages, {
+      role = "user",
+      content = "Please respond in " .. detected_language .. " language."
+    })
+  end
+  
+  -- Query ChatGPT for discussion questions with error handling
+  local discussion_questions = ""
+  local success = pcall(function()
+    discussion_questions = queryChatGPT(discussion_messages, {
+      model = self.model,
+      temperature = 0.8, -- Slightly higher temperature for creative questions
+      max_tokens = self.max_tokens
+    })
+  end)
+  
+  if not success then
+    UIManager:show(InfoMessage:new{
+      text = _("Error: Failed to get discussion questions from ChatGPT"),
+      timeout = 3
+    })
+    return
+  end
+  
+  -- Show discussion questions in a new viewer
+  local discussion_viewer = ChatGPTViewer:new {
+    title = _("Book Club Discussion Questions"),
+    text = discussion_questions,
+    width = self.width,
+    height = self.height,
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens,
+    book_title = self.book_title,
+    book_author = self.book_author,
+    conversation_history = self.conversation_history
+  }
+  
+  UIManager:show(discussion_viewer)
+end
+
+function ChatGPTViewer:getBookRecommendations()
+  if not queryChatGPT then
+    UIManager:show(Notification:new {
+      text = _("Advanced features unavailable. Check gpt_query.lua"),
+    })
+    return
+  end
+  
+  local UIManager = require("ui/uimanager")
+  local InfoMessage = require("ui/widget/infomessage")
+  
+  -- Get the language from the conversation history
+  local detected_language = self:detectLanguage()
+  
+  -- Create a prompt for book recommendations
+  local rec_prompt = {
+    role = "system",
+    content = "You are a literary recommendation expert. Suggest 5 books similar to the one being discussed, with brief descriptions of why they might appeal to the reader. " .. 
+              "Respond in the same language as the user's text. If the text is in a non-English language, provide your response in that language."
+  }
+  
+  -- Store book title and author for use in the result viewer
+  local book_title = self.book_title or _("Unknown Title")
+  local book_author = self.book_author or _("Unknown Author")
+  
+  local book_context = {
+    role = "user",
+    content = string.format("I'm reading '%s' by %s and enjoying it. Can you recommend 5 similar books I might enjoy?", 
+      book_title, book_author)
+  }
+  
+  -- Use existing conversation history to inform recommendations
+  local rec_messages = {rec_prompt, book_context}
+  
+  -- Add relevant parts of conversation history that contain book excerpts
+  for _, msg in ipairs(self.conversation_history) do
+    if msg.role == "user" and msg.content:match("highlighted text") then
+      table.insert(rec_messages, msg)
+    end
+  end
+  
+  -- Add language instruction if detected
+  if detected_language and detected_language ~= "english" then
+    table.insert(rec_messages, {
+      role = "user",
+      content = "Please respond in " .. detected_language .. " language."
+    })
+  end
+  
+  -- Query ChatGPT for recommendations with error handling
+  local recommendations = ""
+  local success = pcall(function()
+    recommendations = queryChatGPT(rec_messages, {
+      model = self.model,
+      temperature = 0.7,
+      max_tokens = self.max_tokens
+    })
+  end)
+  
+  if not success then
+    UIManager:show(InfoMessage:new{
+      text = _("Error: Failed to get recommendations from ChatGPT"),
+      timeout = 3
+    })
+    return
+  end
+  
+  -- Show recommendations in a new viewer
+  local rec_viewer = ChatGPTViewer:new {
+    title = _("Book Recommendations"),
+    text = recommendations,
+    width = self.width,
+    height = self.height,
+    buttons_table = nil,
+    add_default_buttons = true,
+    -- Explicitly pass book title and author to the new viewer
+    book_title = book_title,
+    book_author = book_author,
+    -- Pass other important properties
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens,
+    conversation_history = self.conversation_history
+  }
+  
+  UIManager:show(rec_viewer)
+end
+
+-- Add this function to detect language from conversation history
+function ChatGPTViewer:detectLanguage()
+  -- First check if we have any user messages in the conversation history
+  if self.conversation_history then
+    for _, msg in ipairs(self.conversation_history) do
+      if msg.role == "user" and msg.content:match("highlighted text") then
+        -- Extract the highlighted text
+        local highlighted_text = msg.content:match("\"(.-)\"")
+        if highlighted_text and #highlighted_text > 10 then
+          -- Use a simple heuristic for common languages
+          -- Cyrillic characters (Russian, Ukrainian, etc.)
+          if highlighted_text:match("[\208\209][\128-\191]") then
+            return "russian"
+          end
+          -- Chinese characters
+          if highlighted_text:match("[\228-\233][\128-\191][\128-\191]") then
+            return "chinese"
+          end
+          -- Japanese characters (Hiragana, Katakana, Kanji)
+          if highlighted_text:match("[\227][\129-\131][\128-\191]") then
+            return "japanese"
+          end
+          -- Korean characters
+          if highlighted_text:match("[\234-\237][\176-\191][\128-\191]") then
+            return "korean"
+          end
+          -- Arabic characters
+          if highlighted_text:match("[\216-\217][\128-\191]") then
+            return "arabic"
+          end
+          -- Spanish/French/German/Italian - harder to detect reliably with simple patterns
+          -- We'll rely on ChatGPT's language detection for these
+        end
+      end
+    end
+  end
+  
+  -- Default to English if we can't detect
+  return "english"
 end
 
 return ChatGPTViewer
