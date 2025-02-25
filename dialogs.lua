@@ -57,26 +57,47 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     and CONFIGURATION.features.custom_prompts.system
     or default_prompt
 
+  -- Get model and temperature from configuration if available
+  local model = CONFIGURATION and CONFIGURATION.model or "gpt-3.5-turbo"
+  local temperature = CONFIGURATION and CONFIGURATION.temperature or 0.7
+  local max_tokens = CONFIGURATION and CONFIGURATION.max_tokens or 1024
+
   local message_history = message_history or { {
     role = "system",
     content = system_prompt
   } }
 
-  local function handleNewQuestion(chatgpt_viewer, question)
-    table.insert(message_history, {
+  local function handleNewQuestion(chatgpt_viewer, question, conversation_history)
+    -- Use the conversation history from the viewer if provided
+    local history_to_use = conversation_history or message_history
+    
+    -- Add the new question to the history
+    table.insert(history_to_use, {
       role = "user",
       content = question
     })
 
-    local answer = queryChatGPT(message_history)
+    -- Use model and temperature from viewer if available
+    local query_model = chatgpt_viewer.model or model
+    local query_temperature = chatgpt_viewer.temperature or temperature
+    local query_max_tokens = chatgpt_viewer.max_tokens or max_tokens
+    
+    -- Query ChatGPT with the updated parameters
+    local answer = queryChatGPT(history_to_use, {
+      model = query_model,
+      temperature = query_temperature,
+      max_tokens = query_max_tokens
+    })
 
-    table.insert(message_history, {
+    -- Add the answer to the history
+    table.insert(history_to_use, {
       role = "assistant",
       content = answer
     })
 
-    local result_text = createResultText(highlightedText, message_history)
+    local result_text = createResultText(highlightedText, history_to_use)
 
+    -- Update the viewer with the new text and pass the updated history
     chatgpt_viewer:update(result_text)
   end
 
@@ -109,7 +130,12 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
           }
           table.insert(message_history, question_message)
 
-          local answer = queryChatGPT(message_history)
+          local answer = queryChatGPT(message_history, {
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens
+          })
+          
           local answer_message = {
             role = "assistant",
             content = answer
@@ -121,7 +147,12 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
           local chatgpt_viewer = ChatGPTViewer:new {
             title = _("AskGPT"),
             text = result_text,
-            onAskQuestion = handleNewQuestion
+            onAskQuestion = handleNewQuestion,
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt
           }
 
           UIManager:show(chatgpt_viewer)
@@ -155,7 +186,11 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
                 }
               }
               
-              local success, response = pcall(queryChatGPT, message_history)
+              local success, response = pcall(queryChatGPT, message_history, {
+                model = model,
+                temperature = temperature,
+                max_tokens = max_tokens
+              })
               
               if not success then
                 UIManager:show(InfoMessage:new{
@@ -174,7 +209,12 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
               local chatgpt_viewer = ChatGPTViewer:new {
                 title = _(prompt_name:gsub("^%l", string.upper)),
                 text = result_text,
-                onAskQuestion = handleNewQuestion
+                onAskQuestion = handleNewQuestion,
+                conversation_history = message_history,
+                model = model,
+                temperature = temperature,
+                max_tokens = max_tokens,
+                system_prompt = prompt
               }
 
               UIManager:show(chatgpt_viewer)

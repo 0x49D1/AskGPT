@@ -22,66 +22,87 @@ local https = require("ssl.https")
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 local json = require("json")
+local socket = require("socket")
+local _ = require("gettext")
 
-local function queryChatGPT(message_history)
-  if not message_history or #message_history == 0 then
-    error("No message history provided")
+-- Fallback to api_key.lua for backward compatibility
+if not CONFIGURATION then
+  success, result = pcall(function() return require("api_key") end)
+  if success then
+    CONFIGURATION = {
+      api_key = result.api_key,
+      model = "gpt-3.5-turbo",
+      base_url = "https://api.openai.com/v1/chat/completions"
+    }
+  else
+    print("api_key.lua not found, skipping...")
+  end
+end
+
+local function queryChatGPT(messages, options)
+  if not CONFIGURATION or not CONFIGURATION.api_key then
+    return "Error: API key not found. Please create a configuration.lua file with your OpenAI API key."
   end
 
-  -- Use api_key from CONFIGURATION or fallback to the api_key module
-  local api_key_value = CONFIGURATION and CONFIGURATION.api_key or api_key
-  if not api_key_value then
-    error("No API key configured")
-  end
+  -- Use options if provided, otherwise use defaults from CONFIGURATION
+  local model = options and options.model or CONFIGURATION.model or "gpt-3.5-turbo"
+  local temperature = options and options.temperature or CONFIGURATION.temperature or 0.7
+  local max_tokens = options and options.max_tokens or CONFIGURATION.max_tokens or 1024
+  local base_url = CONFIGURATION.base_url or "https://api.openai.com/v1/chat/completions"
+  
+  -- Additional parameters from configuration
+  local additional_params = CONFIGURATION.additional_parameters or {}
 
-  local api_url = CONFIGURATION and CONFIGURATION.base_url or "https://api.openai.com/v1/chat/completions"
-  local model = CONFIGURATION and CONFIGURATION.model or "gpt-4o-mini"
-
-  -- Determine whether to use http or https
-  local request_library = api_url:match("^https://") and https or http
-
-  -- Start building the request body
-  local requestBodyTable = {
+  -- Prepare the request body
+  local request_body = {
     model = model,
-    messages = message_history,
+    messages = messages,
+    temperature = temperature,
+    max_tokens = max_tokens
   }
-
-  -- Add additional parameters if they exist
-  if CONFIGURATION and CONFIGURATION.additional_parameters then
-    for key, value in pairs(CONFIGURATION.additional_parameters) do
-      requestBodyTable[key] = value
-    end
+  
+  -- Add any additional parameters
+  for k, v in pairs(additional_params) do
+    request_body[k] = v
   end
-
-  -- Encode the request body as JSON
-  local requestBody = json.encode(requestBodyTable)
-
-  local headers = {
-    ["Content-Type"] = "application/json",
-    ["Authorization"] = "Bearer " .. api_key_value,
-  }
-
-  local responseBody = {}
-
-  -- Make the HTTP/HTTPS request
-  local res, code, responseHeaders = request_library.request {
-    url = api_url,
+  
+  local request_json = json.encode(request_body)
+  
+  -- Set timeout to 60 seconds
+  http.TIMEOUT = 60
+  
+  -- Prepare response table
+  local response_body = {}
+  
+  -- Make the request
+  local _, code, headers = http.request {
+    url = base_url,
     method = "POST",
-    headers = headers,
-    source = ltn12.source.string(requestBody),
-    sink = ltn12.sink.table(responseBody),
+    headers = {
+      ["Content-Type"] = "application/json",
+      ["Authorization"] = "Bearer " .. CONFIGURATION.api_key,
+      ["Content-Length"] = #request_json
+    },
+    source = ltn12.source.string(request_json),
+    sink = ltn12.sink.table(response_body)
   }
-
+  
+  -- Check for errors
   if code ~= 200 then
-    error("Error querying ChatGPT API: " .. (code or "unknown error"))
+    return "Error: " .. code .. " - " .. table.concat(response_body)
   end
-
-  local response = json.decode(table.concat(responseBody))
-  if not response or not response.choices or not response.choices[1] or not response.choices[1].message then
-    error("Invalid response format from API")
+  
+  -- Parse the response
+  local response_json = table.concat(response_body)
+  local response = json.decode(response_json)
+  
+  -- Extract the message content
+  if response and response.choices and response.choices[1] and 
+     response.choices[1].message and response.choices[1].message.content then
+    return response.choices[1].message.content
+  else
+    return "Error: Unexpected response format from API"
   end
-
-  return response.choices[1].message.content or "No response content"
 end
 
 return queryChatGPT

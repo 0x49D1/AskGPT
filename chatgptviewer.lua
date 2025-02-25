@@ -66,6 +66,11 @@ local ChatGPTViewer = InputContainer:extend {
   find_centered_lines_count = 5, -- line with find results to be not far from the center
 
   onAskQuestion = nil,
+  conversation_history = {}, -- Store conversation history
+  model = "gpt-3.5-turbo", -- Default model
+  temperature = 0.7, -- Default temperature
+  max_tokens = 1024, -- Default max tokens
+  system_prompt = "You are a helpful assistant.", -- Default system prompt
 }
 
 function ChatGPTViewer:init()
@@ -185,6 +190,9 @@ function ChatGPTViewer:init()
     end
   end
 
+  -- Initialize conversation history if not provided
+  self.conversation_history = self.conversation_history or {}
+
   -- buttons
   local default_buttons =
   {
@@ -193,6 +201,20 @@ function ChatGPTViewer:init()
       id = "ask_another_question",
       callback = function()
         self:askAnotherQuestion()
+      end,
+    },
+    {
+      text = _("Settings"),
+      id = "settings",
+      callback = function()
+        self:showSettings()
+      end,
+    },
+    {
+      text = _("Export"),
+      id = "export",
+      callback = function()
+        self:exportConversation()
       end,
     },
     {
@@ -321,7 +343,9 @@ function ChatGPTViewer:askAnotherQuestion()
           callback = function()
             local input_text = input_dialog:getInputText()
             if input_text and input_text ~= "" then
-              self:onAskQuestion(input_text)
+              -- Add user message to conversation history
+              table.insert(self.conversation_history, {role = "user", content = input_text})
+              self:onAskQuestion(input_text, self.conversation_history)
             end
             UIManager:close(input_dialog)
           end,
@@ -331,6 +355,87 @@ function ChatGPTViewer:askAnotherQuestion()
   }
   UIManager:show(input_dialog)
   input_dialog:onShowKeyboard()
+end
+
+function ChatGPTViewer:showSettings()
+  local MultiInputDialog = require("ui/widget/multiinputdialog")
+  local settings_dialog
+  
+  settings_dialog = MultiInputDialog:new {
+    title = _("ChatGPT Settings"),
+    fields = {
+      {
+        text = self.model or "gpt-3.5-turbo",
+        hint = _("Model (e.g., gpt-3.5-turbo, gpt-4)"),
+        label = _("Model:"),
+      },
+      {
+        text = tostring(self.temperature or 0.7),
+        hint = _("Temperature (0.0-2.0)"),
+        label = _("Temperature:"),
+      },
+      {
+        text = tostring(self.max_tokens or 1024),
+        hint = _("Max tokens (e.g., 1024)"),
+        label = _("Max tokens:"),
+      },
+      {
+        text = self.system_prompt or "You are a helpful assistant.",
+        hint = _("System prompt"),
+        label = _("System prompt:"),
+      },
+    },
+    buttons = {
+      {
+        {
+          text = _("Cancel"),
+          callback = function()
+            UIManager:close(settings_dialog)
+          end,
+        },
+        {
+          text = _("Clear History"),
+          callback = function()
+            self.conversation_history = {}
+            UIManager:show(Notification:new {
+              text = _("Conversation history cleared."),
+            })
+            UIManager:close(settings_dialog)
+          end,
+        },
+        {
+          text = _("Save"),
+          is_enter_default = true,
+          callback = function()
+            local fields = settings_dialog:getFields()
+            self.model = fields[1]
+            self.temperature = tonumber(fields[2]) or 0.7
+            self.max_tokens = tonumber(fields[3]) or 1024
+            self.system_prompt = fields[4]
+            
+            -- Add system message at the beginning if history is empty
+            if #self.conversation_history == 0 then
+              table.insert(self.conversation_history, {role = "system", content = self.system_prompt})
+            else
+              -- Update system message if it exists
+              if self.conversation_history[1].role == "system" then
+                self.conversation_history[1].content = self.system_prompt
+              else
+                -- Insert system message at the beginning
+                table.insert(self.conversation_history, 1, {role = "system", content = self.system_prompt})
+              end
+            end
+            
+            UIManager:show(Notification:new {
+              text = _("Settings saved."),
+            })
+            UIManager:close(settings_dialog)
+          end,
+        },
+      },
+    },
+  }
+  UIManager:show(settings_dialog)
 end
 
 function ChatGPTViewer:onCloseWidget()
@@ -455,7 +560,12 @@ function ChatGPTViewer:handleTextSelection(text, hold_duration, start_idx, end_i
   end
 end
 
-function ChatGPTViewer:update(new_text)
+function ChatGPTViewer:update(new_text, is_error)
+  -- Add assistant response to conversation history if not an error
+  if not is_error then
+    table.insert(self.conversation_history, {role = "assistant", content = new_text})
+  end
+  
   UIManager:close(self)
   local updated_viewer = ChatGPTViewer:new {
     title = self.title,
@@ -464,9 +574,88 @@ function ChatGPTViewer:update(new_text)
     height = self.height,
     buttons_table = self.buttons_table,
     onAskQuestion = self.onAskQuestion,
+    conversation_history = self.conversation_history,
+    model = self.model,
+    temperature = self.temperature,
+    max_tokens = self.max_tokens,
+    system_prompt = self.system_prompt,
   }
   updated_viewer.scroll_text_w:scrollToBottom()
   UIManager:show(updated_viewer)
+end
+
+function ChatGPTViewer:exportConversation()
+  local InputDialog = require("ui/widget/inputdialog")
+  local filename_dialog
+  
+  filename_dialog = InputDialog:new {
+    title = _("Export Conversation"),
+    input = "chatgpt_conversation.txt",
+    input_type = "text",
+    description = _("Enter filename to save the conversation:"),
+    buttons = {
+      {
+        {
+          text = _("Cancel"),
+          callback = function()
+            UIManager:close(filename_dialog)
+          end,
+        },
+        {
+          text = _("Save"),
+          is_enter_default = true,
+          callback = function()
+            local filename = filename_dialog:getInputText()
+            if filename and filename ~= "" then
+              self:saveConversationToFile(filename)
+            end
+            UIManager:close(filename_dialog)
+          end,
+        },
+      },
+    },
+  }
+  UIManager:show(filename_dialog)
+end
+
+function ChatGPTViewer:saveConversationToFile(filename)
+  local DocumentRegistry = require("document/documentregistry")
+  local lfs = require("libs/libkoreader-lfs")
+  
+  -- Ensure filename has .txt extension
+  if not filename:match("%.txt$") then
+    filename = filename .. ".txt"
+  end
+  
+  -- Get documents path
+  local documents_dir = G_reader_settings:readSetting("home_dir") or lfs.currentdir()
+  local full_path = documents_dir .. "/" .. filename
+  
+  -- Format conversation
+  local content = ""
+  for _, message in ipairs(self.conversation_history) do
+    if message.role == "system" then
+      content = content .. "System: " .. message.content .. "\n\n"
+    elseif message.role == "user" then
+      content = content .. "User: " .. message.content .. "\n\n"
+    elseif message.role == "assistant" then
+      content = content .. "Assistant: " .. message.content .. "\n\n"
+    end
+  end
+  
+  -- Write to file
+  local file = io.open(full_path, "w")
+  if file then
+    file:write(content)
+    file:close()
+    UIManager:show(Notification:new {
+      text = T(_("Conversation saved to %1"), filename),
+    })
+  else
+    UIManager:show(Notification:new {
+      text = T(_("Failed to save conversation to %1"), filename),
+    })
+  end
 end
 
 return ChatGPTViewer
