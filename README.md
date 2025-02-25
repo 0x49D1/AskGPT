@@ -2,6 +2,16 @@
 
 Introducing AskGPT, a new plugin for KOReader that allows you to ask questions about the parts of the book you're reading and receive insightful answers from ChatGPT, an AI language model. With AskGPT, you can have a more interactive and engaging reading experience, and gain a deeper understanding of the content.
 
+## Features
+
+- Ask questions about highlighted text
+- Get book recommendations based on what you're reading
+- Analyze characters and plot elements
+- Generate discussion questions
+- Perform book analysis
+- Access conversation history to revisit previous interactions
+- Customize system prompts for different types of analysis
+
 ## Getting Started
 
 To use this plugin, You'll need to do a few things:
@@ -121,3 +131,36 @@ License: GPLv3
 ## Updates
 
 To check for updates to AskGPT, visit the [GitHub releases page](https://github.com/drewbaumann/AskGPT/releases). If a new version is available, download it and replace your existing askgpt.koplugin folder in the koreader/plugins directory.
+
+### History Feature
+
+The plugin now keeps track of your conversations with ChatGPT. To access your conversation history:
+
+1. Highlight some text in your book
+2. Long-press on the highlighted text
+3. Select "AskGPT" from the menu
+4. Tap the "History" button
+5. Select a previous conversation to view or continue
+
+Your conversation history is saved between sessions, allowing you to revisit important insights or continue previous discussions.
+
+## Configuration
+
+Create a `configuration.lua` file in the plugin directory to customize settings. You can use the provided `configuration.lua.sample` as a template.
+
+### Available Settings
+
+- `model`: The ChatGPT model to use (default: "gpt-3.5-turbo")
+- `temperature`: Controls randomness (0.0-1.0, default: 0.7)
+- `max_tokens`: Maximum response length (default: 1024)
+- `features`: Enable/disable specific features
+- `custom_prompts`: Define custom system prompts
+
+## Requirements
+
+- An internet connection
+- An OpenAI API key (set in KOReader settings)
+
+## License
+
+This plugin is released under the MIT License.
