@@ -3,8 +3,93 @@ local ChatGPTViewer = require("chatgptviewer")
 local UIManager = require("ui/uimanager")
 local InfoMessage = require("ui/widget/infomessage")
 local _ = require("gettext")
+local Menu = require("ui/widget/menu")
+local Screen = require("device").screen
+local DataStorage = require("datastorage")
+local lfs = require("libs/libkoreader-lfs")
 
 local queryChatGPT = require("gpt_query")
+
+-- Add a global history table to store conversations
+local HISTORY = {}
+
+-- Try to load history from file
+local function loadHistory()
+  local history_file = DataStorage:getDataDir() .. "/plugins/askgpt/history.lua"
+  local success, result = pcall(function() 
+    local file = io.open(history_file, "r")
+    if file then
+      local content = file:read("*all")
+      file:close()
+      return loadstring("return " .. content)()
+    end
+    return {}
+  end)
+  
+  if success and type(result) == "table" then
+    HISTORY = result
+  else
+    HISTORY = {}
+  end
+end
+
+-- Save history to file
+local function saveHistory()
+  -- Create directory if it doesn't exist
+  local dir = DataStorage:getDataDir() .. "/plugins/askgpt"
+  if not lfs.attributes(dir, "mode") then
+    lfs.mkdir(dir)
+  end
+  
+  local history_file = dir .. "/history.lua"
+  local success = pcall(function()
+    local file = io.open(history_file, "w")
+    if file then
+      -- Convert history to string representation
+      local content = "{\n"
+      for i, item in ipairs(HISTORY) do
+        content = content .. "  {\n"
+        content = content .. "    title = " .. string.format("%q", item.title) .. ",\n"
+        content = content .. "    text = " .. string.format("%q", item.text) .. ",\n"
+        content = content .. "    timestamp = " .. tostring(item.timestamp) .. ",\n"
+        
+        -- Convert conversation history to string
+        content = content .. "    conversation_history = {\n"
+        for j, msg in ipairs(item.conversation_history) do
+          content = content .. "      {\n"
+          content = content .. "        role = " .. string.format("%q", msg.role) .. ",\n"
+          content = content .. "        content = " .. string.format("%q", msg.content) .. ",\n"
+          content = content .. "      },\n"
+        end
+        content = content .. "    },\n"
+        
+        content = content .. "  },\n"
+      end
+      content = content .. "}"
+      
+      file:write(content)
+      file:close()
+    end
+  end)
+end
+
+-- Add a function to save the current conversation to history
+local function saveToHistory(title, text, conversation_history)
+  table.insert(HISTORY, {
+    title = title,
+    text = text,
+    conversation_history = conversation_history,
+    timestamp = os.time()
+  })
+  
+  -- Limit history size to prevent memory issues
+  if #HISTORY > 20 then
+    table.remove(HISTORY, 1)
+  end
+  
+  -- Save history to file
+  saveHistory()
+end
 
 local CONFIGURATION = nil
 local buttons, input_dialog
@@ -15,6 +100,9 @@ if success then
 else
   print("configuration.lua not found, skipping...")
 end
+
+-- Load history when the module is loaded
+loadHistory()
 
 -- Helper function to check if a feature is enabled
 local function isFeatureEnabled(feature_name, default)
@@ -115,6 +203,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
 
     -- Update the viewer with the new text and pass the updated history
     chatgpt_viewer:update(result_text)
+    
+    -- Save to history
+    saveToHistory(chatgpt_viewer.title, result_text, history_to_use)
   end
 
   buttons = {
@@ -174,10 +265,61 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
           }
 
           UIManager:show(chatgpt_viewer)
+          
+          -- Save to history
+          saveToHistory(_("AskGPT"), result_text, message_history)
         end)
       end
     }
   }
+
+  -- Add "History" button to the main dialog
+  table.insert(buttons, {
+    text = _("History"),
+    callback = function()
+      UIManager:close(input_dialog)
+      
+      if #HISTORY == 0 then
+        UIManager:show(InfoMessage:new{
+          text = _("No conversation history available"),
+          timeout = 2
+        })
+        return
+      end
+      
+      local menu_items = {}
+      for i, item in ipairs(HISTORY) do
+        table.insert(menu_items, {
+          text = item.title .. " (" .. os.date("%Y-%m-%d %H:%M", item.timestamp) .. ")",
+          callback = function()
+            local chatgpt_viewer = ChatGPTViewer:new {
+              title = item.title,
+              text = item.text,
+              onAskQuestion = handleNewQuestion,
+              conversation_history = item.conversation_history,
+              model = model,
+              temperature = temperature,
+              max_tokens = max_tokens,
+              system_prompt = system_prompt,
+              book_title = title,
+              book_author = author
+            }
+            UIManager:show(chatgpt_viewer)
+          end
+        })
+      end
+      
+      local history_menu = Menu:new{
+        title = _("Conversation History"),
+        item_table = menu_items,
+        is_borderless = true,
+        is_popout = false,
+        width = Screen:getWidth() * 0.8,
+        height = Screen:getHeight() * 0.8,
+      }
+      UIManager:show(history_menu)
+    end
+  })
 
   -- Add buttons for each custom prompt
   if CONFIGURATION and CONFIGURATION.features and CONFIGURATION.features.custom_prompts then
@@ -238,6 +380,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
               }
 
               UIManager:show(chatgpt_viewer)
+              
+              -- Save to history
+              saveToHistory(_(prompt_name:gsub("^%l", string.upper)), result_text, message_history)
             end)
           end
         })
