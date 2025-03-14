@@ -465,45 +465,6 @@ function ChatGPTViewer:showSettings()
   local discussion_enabled = isFeatureEnabled("discussion", true)
   local recommendations_enabled = isFeatureEnabled("recommendations", true)
   
-  -- Create checkboxes for features
-  local book_analysis_checkbox = CheckButton:new{
-    text = _("Book Analysis"),
-    checked = book_analysis_enabled,
-    callback = function() book_analysis_enabled = not book_analysis_enabled end,
-  }
-  
-  local characters_plot_checkbox = CheckButton:new{
-    text = _("Characters & Plot"),
-    checked = characters_plot_enabled,
-    callback = function() characters_plot_enabled = not characters_plot_enabled end,
-  }
-  
-  local discussion_checkbox = CheckButton:new{
-    text = _("Discussion"),
-    checked = discussion_enabled,
-    callback = function() discussion_enabled = not discussion_enabled end,
-  }
-  
-  local recommendations_checkbox = CheckButton:new{
-    text = _("Recommendations"),
-    checked = recommendations_enabled,
-    callback = function() recommendations_enabled = not recommendations_enabled end,
-  }
-  
-  -- Create feature settings group
-  local feature_settings = VerticalGroup:new{
-    TextBoxWidget:new{
-      text = _("Enable/Disable Features:"),
-      face = Font:getFace("smallinfofont"),
-      width = self.width * 0.8,
-    },
-    VerticalSpan:new{ width = Size.span.vertical_small },
-    book_analysis_checkbox,
-    characters_plot_checkbox,
-    discussion_checkbox,
-    recommendations_checkbox,
-  }
-  
   local settings_dialog
   
   settings_dialog = MultiInputDialog:new {
@@ -633,19 +594,53 @@ function ChatGPTViewer:showSettings()
       },
     },
   }
-  
-  -- Add feature settings to dialog
-  settings_dialog[1] = VerticalGroup:new{
-    settings_dialog[1],
-    VerticalSpan:new{ width = Size.span.vertical_large },
-    FrameContainer:new{
-      padding = Size.padding.default,
-      margin = Size.margin.small,
-      bordersize = 0,
-      feature_settings,
-    }
+
+  -- Create checkboxes for features
+  local book_analysis_checkbox = CheckButton:new{
+    text = _("Book Analysis"),
+    checked = book_analysis_enabled,
+    callback = function() book_analysis_enabled = not book_analysis_enabled end,
+    parent = settings_dialog,
   }
   
+  local characters_plot_checkbox = CheckButton:new{
+    text = _("Characters & Plot"),
+    checked = characters_plot_enabled,
+    callback = function() characters_plot_enabled = not characters_plot_enabled end,
+    parent = settings_dialog,
+  }
+  
+  local discussion_checkbox = CheckButton:new{
+    text = _("Discussion"),
+    checked = discussion_enabled,
+    callback = function() discussion_enabled = not discussion_enabled end,
+    parent = settings_dialog,
+  }
+  
+  local recommendations_checkbox = CheckButton:new{
+    text = _("Recommendations"),
+    checked = recommendations_enabled,
+    callback = function() recommendations_enabled = not recommendations_enabled end,
+    parent = settings_dialog,
+  }
+  
+  -- Create feature settings group
+  local feature_settings = VerticalGroup:new{
+    TextBoxWidget:new{
+      text = _("  Enable/Disable Features:"),
+      face = Font:getFace("smallinfofont"),
+      width = self.width * 0.8,
+    },
+    VerticalSpan:new{ width = Size.span.vertical_small },
+    book_analysis_checkbox,
+    characters_plot_checkbox,
+    discussion_checkbox,
+    recommendations_checkbox,
+  }
+  
+  -- Add feature settings to dialog
+  settings_dialog:addWidget(feature_settings)
+
   UIManager:show(settings_dialog)
 end
 
