@@ -7,6 +7,7 @@ local Menu = require("ui/widget/menu")
 local Screen = require("device").screen
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
+local json = require("json")
 
 local queryChatGPT = require("gpt_query")
 
@@ -15,17 +16,17 @@ local HISTORY = {}
 
 -- Try to load history from file
 local function loadHistory()
-  local history_file = DataStorage:getDataDir() .. "/plugins/askgpt/history.lua"
-  local success, result = pcall(function() 
+  local history_file = DataStorage:getDataDir() .. "/plugins/askgpt/history.json"
+  local success, result = pcall(function()
     local file = io.open(history_file, "r")
     if file then
       local content = file:read("*all")
       file:close()
-      return loadstring("return " .. content)()
+      return json.decode(content)
     end
     return {}
   end)
-  
+
   if success and type(result) == "table" then
     HISTORY = result
   else
@@ -40,33 +41,12 @@ local function saveHistory()
   if not lfs.attributes(dir, "mode") then
     lfs.mkdir(dir)
   end
-  
-  local history_file = dir .. "/history.lua"
+
+  local history_file = dir .. "/history.json"
   local success = pcall(function()
     local file = io.open(history_file, "w")
     if file then
-      -- Convert history to string representation
-      local content = "{\n"
-      for i, item in ipairs(HISTORY) do
-        content = content .. "  {\n"
-        content = content .. "    title = " .. string.format("%q", item.title) .. ",\n"
-        content = content .. "    text = " .. string.format("%q", item.text) .. ",\n"
-        content = content .. "    timestamp = " .. tostring(item.timestamp) .. ",\n"
-        
-        -- Convert conversation history to string
-        content = content .. "    conversation_history = {\n"
-        for j, msg in ipairs(item.conversation_history) do
-          content = content .. "      {\n"
-          content = content .. "        role = " .. string.format("%q", msg.role) .. ",\n"
-          content = content .. "        content = " .. string.format("%q", msg.content) .. ",\n"
-          content = content .. "      },\n"
-        end
-        content = content .. "    },\n"
-        
-        content = content .. "  },\n"
-      end
-      content = content .. "}"
-      
+      local content = json.encode(HISTORY)
       file:write(content)
       file:close()
     end
@@ -171,27 +151,62 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     content = system_prompt
   } }
 
+  local function pruneConversationHistory(history, max_messages)
+    -- Keep system message (first) and prune old user/assistant pairs if needed
+    if #history <= max_messages then
+      return history
+    end
+
+    local pruned = {}
+    -- Always keep system message if present
+    if history[1] and history[1].role == "system" then
+      table.insert(pruned, history[1])
+    end
+
+    -- Keep the most recent messages
+    local start_index = math.max(2, #history - max_messages + 2)
+    for i = start_index, #history do
+      table.insert(pruned, history[i])
+    end
+
+    return pruned
+  end
+
   local function handleNewQuestion(chatgpt_viewer, question, conversation_history)
     -- Use the conversation history from the viewer if provided
     local history_to_use = conversation_history or message_history
-    
+
     -- Add the new question to the history
     table.insert(history_to_use, {
       role = "user",
       content = question
     })
 
+    -- Prune history to prevent token limit issues (keep last 20 messages)
+    history_to_use = pruneConversationHistory(history_to_use, 20)
+
     -- Use model and temperature from viewer if available
     local query_model = chatgpt_viewer.model or model
     local query_temperature = chatgpt_viewer.temperature or temperature
     local query_max_tokens = chatgpt_viewer.max_tokens or max_tokens
-    
+
     -- Query ChatGPT with the updated parameters
     local answer = queryChatGPT(history_to_use, {
       model = query_model,
       temperature = query_temperature,
       max_tokens = query_max_tokens
     })
+
+    -- Check if answer is an error
+    if answer:match("^Error:") then
+      UIManager:show(InfoMessage:new{
+        text = answer,
+        timeout = 5
+      })
+      -- Remove the question from history since API failed
+      table.remove(history_to_use)
+      return
+    end
 
     -- Add the answer to the history
     table.insert(history_to_use, {
@@ -203,7 +218,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
 
     -- Update the viewer with the new text and pass the updated history
     chatgpt_viewer:update(result_text)
-    
+
     -- Save to history
     saveToHistory(chatgpt_viewer.title, result_text, history_to_use)
   end
@@ -220,6 +235,16 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
       text = _("Ask"),
       callback = function()
         local question = input_dialog:getInputText()
+
+        -- Validate empty input
+        if not question or question:match("^%s*$") then
+          UIManager:show(InfoMessage:new{
+            text = _("Please enter a question."),
+            timeout = 2
+          })
+          return
+        end
+
         UIManager:close(input_dialog)
         showLoadingDialog()
 
@@ -242,7 +267,19 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             temperature = temperature,
             max_tokens = max_tokens
           })
-          
+
+          -- Check if answer is an error
+          if answer:match("^Error:") then
+            UIManager:show(InfoMessage:new{
+              text = answer,
+              timeout = 5
+            })
+            -- Remove the question messages from history since API failed
+            table.remove(message_history)
+            table.remove(message_history)
+            return
+          end
+
           local answer_message = {
             role = "assistant",
             content = answer
@@ -265,7 +302,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
           }
 
           UIManager:show(chatgpt_viewer)
-          
+
           -- Save to history
           saveToHistory(_("AskGPT"), result_text, message_history)
         end)
@@ -305,6 +342,29 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
               book_author = author
             }
             UIManager:show(chatgpt_viewer)
+          end,
+          hold_callback = function()
+            local ConfirmBox = require("ui/widget/confirmbox")
+            UIManager:show(ConfirmBox:new{
+              text = _("Delete this conversation from history?"),
+              ok_text = _("Delete"),
+              ok_callback = function()
+                table.remove(HISTORY, i)
+                saveHistory()
+                UIManager:show(InfoMessage:new{
+                  text = _("Conversation deleted."),
+                  timeout = 2
+                })
+                -- Refresh the history menu
+                UIManager:close(history_menu)
+                if #HISTORY > 0 then
+                  -- Re-show history if items remain
+                  UIManager:scheduleIn(0.3, function()
+                    buttons[3].callback()  -- Re-trigger History button callback
+                  end)
+                end
+              end,
+            })
           end
         })
       end
@@ -321,258 +381,169 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     end
   })
 
-  -- Add buttons for each custom prompt
+  -- Add buttons for custom prompts (limit to 5, rest in submenu)
   if CONFIGURATION and CONFIGURATION.features and CONFIGURATION.features.custom_prompts then
+    local custom_prompts = {}
     for prompt_name, prompt in pairs(CONFIGURATION.features.custom_prompts) do
-      if prompt_name ~= "system" and type(prompt) == "string" then  -- Ensure prompt is valid
-        if not prompt:lower():find("translate") then
-          prompt = prompt .. " Detect the language and answer using that language."
-        end
-        table.insert(buttons, {
-          text = _(prompt_name:gsub("^%l", string.upper)),  -- Capitalize first letter
-          callback = function()
-            showLoadingDialog()
-
-            UIManager:scheduleIn(0.1, function()
-              message_history = {  -- Reset message history for new prompt
-                {
-                  role = "system",
-                  content = prompt
-                },
-                {
-                  role = "user",
-                  content = "I'm reading something titled '" .. title .. "' by " .. author .. 
-                    "'. Here's the text I want you to process: " .. highlightedText
-                }
-              }
-              
-              local success, response = pcall(queryChatGPT, message_history, {
-                model = model,
-                temperature = temperature,
-                max_tokens = max_tokens
-              })
-              
-              if not success then
-                UIManager:show(InfoMessage:new{
-                  text = _("Error: Failed to get response from ChatGPT"),
-                })
-                return
-              end
-
-              table.insert(message_history, { 
-                role = "assistant", 
-                content = response 
-              })
-
-              local result_text = createResultText(highlightedText, message_history)
-
-              local chatgpt_viewer = ChatGPTViewer:new {
-                title = _(prompt_name:gsub("^%l", string.upper)),
-                text = result_text,
-                onAskQuestion = handleNewQuestion,
-                conversation_history = message_history,
-                model = model,
-                temperature = temperature,
-                max_tokens = max_tokens,
-                system_prompt = prompt,
-                book_title = title,
-                book_author = author
-              }
-
-              UIManager:show(chatgpt_viewer)
-              
-              -- Save to history
-              saveToHistory(_(prompt_name:gsub("^%l", string.upper)), result_text, message_history)
-            end)
-          end
-        })
+      if prompt_name ~= "system" and type(prompt) == "string" then
+        table.insert(custom_prompts, {name = prompt_name, prompt = prompt})
       end
+    end
+
+    local function createCustomPromptCallback(prompt_name, prompt)
+      if not prompt:lower():find("translate") then
+        prompt = prompt .. " Detect the language and answer using that language."
+      end
+
+      return function()
+        UIManager:close(input_dialog)
+        showLoadingDialog()
+
+        UIManager:scheduleIn(0.1, function()
+          message_history = {  -- Reset message history for new prompt
+            {
+              role = "system",
+              content = prompt
+            },
+            {
+              role = "user",
+              content = "I'm reading something titled '" .. title .. "' by " .. author ..
+                "'. Here's the text I want you to process: " .. highlightedText
+            }
+          }
+
+          local success, response = pcall(queryChatGPT, message_history, {
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens
+          })
+
+          if not success or (response and response:match("^Error:")) then
+            UIManager:show(InfoMessage:new{
+              text = response or _("Error: Failed to get response from ChatGPT"),
+              timeout = 5
+            })
+            return
+          end
+
+          table.insert(message_history, {
+            role = "assistant",
+            content = response
+          })
+
+          local result_text = createResultText(highlightedText, message_history)
+
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = _(prompt_name:gsub("^%l", string.upper)),
+            text = result_text,
+            onAskQuestion = handleNewQuestion,
+            conversation_history = message_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = prompt,
+            book_title = title,
+            book_author = author
+          }
+
+          UIManager:show(chatgpt_viewer)
+
+          -- Save to history
+          saveToHistory(_(prompt_name:gsub("^%l", string.upper)), result_text, message_history)
+        end)
+      end
+    end
+
+    -- Add first 5 prompts as direct buttons
+    for i = 1, math.min(5, #custom_prompts) do
+      table.insert(buttons, {
+        text = _(custom_prompts[i].name:gsub("^%l", string.upper)),
+        callback = createCustomPromptCallback(custom_prompts[i].name, custom_prompts[i].prompt)
+      })
+    end
+
+    -- If more than 5, add "More Prompts..." button
+    if #custom_prompts > 5 then
+      table.insert(buttons, {
+        text = _("More Prompts..."),
+        callback = function()
+          UIManager:close(input_dialog)
+
+          local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
+          local more_buttons = {}
+
+          for i = 6, #custom_prompts do
+            table.insert(more_buttons, {{
+              text = _(custom_prompts[i].name:gsub("^%l", string.upper)),
+              callback = function()
+                UIManager:close(more_prompts_dialog)
+                createCustomPromptCallback(custom_prompts[i].name, custom_prompts[i].prompt)()
+              end
+            }})
+          end
+
+          more_prompts_dialog = ButtonDialogTitle:new{
+            title = _("Select a custom prompt"),
+            buttons = more_buttons,
+          }
+          UIManager:show(more_prompts_dialog)
+        end
+      })
     end
   end
 
-  -- Add Book Analysis button
-  if isFeatureEnabled("book_analysis", true) then
-    table.insert(buttons, {
-      text = _("Book Analysis"),
-      callback = function()
-        UIManager:close(input_dialog)
-        
-        -- Show loading indicator
-        local loading = InfoMessage:new{
-          text = _("Analyzing book..."),
-          timeout = 0 -- No timeout, we'll close it manually
-        }
-        UIManager:show(loading)
-        
-        -- Use pcall to handle errors
-        local success, err = pcall(function()
-          -- Create a ChatGPTViewer instance to use its analyzeBook method
-          local chatgpt_viewer = ChatGPTViewer:new {
-            title = _("Book Analysis"),
-            text = "",
-            conversation_history = message_history,
-            model = model,
-            temperature = temperature,
-            max_tokens = max_tokens,
-            system_prompt = system_prompt,
-            book_title = title,
-            book_author = author
+  -- Helper function to add feature buttons
+  local function addFeatureButton(feature_name, button_text, loading_text, viewer_method)
+    if isFeatureEnabled(feature_name, true) then
+      table.insert(buttons, {
+        text = _(button_text),
+        callback = function()
+          UIManager:close(input_dialog)
+
+          -- Show loading indicator
+          local loading = InfoMessage:new{
+            text = _(loading_text),
+            timeout = 0
           }
-          
-          chatgpt_viewer:analyzeBook()
-        end)
-        
-        -- Close loading indicator
-        UIManager:close(loading)
-        
-        -- Show error if failed
-        if not success then
-          UIManager:show(InfoMessage:new{
-            text = _("Error: ") .. tostring(err),
-            timeout = 3
-          })
+          UIManager:show(loading)
+
+          -- Use pcall to handle errors
+          local success, err = pcall(function()
+            local chatgpt_viewer = ChatGPTViewer:new {
+              title = _(button_text),
+              text = "",
+              conversation_history = message_history,
+              model = model,
+              temperature = temperature,
+              max_tokens = max_tokens,
+              system_prompt = system_prompt,
+              book_title = title,
+              book_author = author
+            }
+
+            chatgpt_viewer[viewer_method](chatgpt_viewer)
+          end)
+
+          -- Close loading indicator
+          UIManager:close(loading)
+
+          -- Show error if failed
+          if not success then
+            UIManager:show(InfoMessage:new{
+              text = _("Error: ") .. tostring(err),
+              timeout = 3
+            })
+          end
         end
-      end
-    })
+      })
+    end
   end
 
-  -- Add Characters & Plot button
-  if isFeatureEnabled("characters_plot", true) then
-    table.insert(buttons, {
-      text = _("Characters & Plot"),
-      callback = function()
-        UIManager:close(input_dialog)
-        
-        -- Show loading indicator
-        local loading = InfoMessage:new{
-          text = _("Analyzing characters and plot..."),
-          timeout = 0 -- No timeout, we'll close it manually
-        }
-        UIManager:show(loading)
-        
-        -- Use pcall to handle errors
-        local success, err = pcall(function()
-          -- Create a ChatGPTViewer instance to use its trackCharactersAndPlot method
-          local chatgpt_viewer = ChatGPTViewer:new {
-            title = _("Characters & Plot"),
-            text = "",
-            conversation_history = message_history,
-            model = model,
-            temperature = temperature,
-            max_tokens = max_tokens,
-            system_prompt = system_prompt,
-            book_title = title,
-            book_author = author
-          }
-          
-          chatgpt_viewer:trackCharactersAndPlot()
-        end)
-        
-        -- Close loading indicator
-        UIManager:close(loading)
-        
-        -- Show error if failed
-        if not success then
-          UIManager:show(InfoMessage:new{
-            text = _("Error: ") .. tostring(err),
-            timeout = 3
-          })
-        end
-      end
-    })
-  end
-
-  -- Add Discussion button
-  if isFeatureEnabled("discussion", true) then
-    table.insert(buttons, {
-      text = _("Discussion"),
-      callback = function()
-        UIManager:close(input_dialog)
-        
-        -- Show loading indicator
-        local loading = InfoMessage:new{
-          text = _("Generating discussion questions..."),
-          timeout = 0 -- No timeout, we'll close it manually
-        }
-        UIManager:show(loading)
-        
-        -- Use pcall to handle errors
-        local success, err = pcall(function()
-          -- Create a ChatGPTViewer instance to use its generateDiscussionQuestions method
-          local chatgpt_viewer = ChatGPTViewer:new {
-            title = _("Discussion"),
-            text = "",
-            conversation_history = message_history,
-            model = model,
-            temperature = temperature,
-            max_tokens = max_tokens,
-            system_prompt = system_prompt,
-            book_title = title,
-            book_author = author
-          }
-          
-          chatgpt_viewer:generateDiscussionQuestions()
-        end)
-        
-        -- Close loading indicator
-        UIManager:close(loading)
-        
-        -- Show error if failed
-        if not success then
-          UIManager:show(InfoMessage:new{
-            text = _("Error: ") .. tostring(err),
-            timeout = 3
-          })
-        end
-      end
-    })
-  end
-
-  -- Add Recommendations button
-  if isFeatureEnabled("recommendations", true) then
-    table.insert(buttons, {
-      text = _("Recommendations"),
-      callback = function()
-        UIManager:close(input_dialog)
-        
-        -- Show loading indicator
-        local loading = InfoMessage:new{
-          text = _("Finding book recommendations..."),
-          timeout = 0 -- No timeout, we'll close it manually
-        }
-        UIManager:show(loading)
-        
-        -- Use pcall to handle errors
-        local success, err = pcall(function()
-          -- Create a ChatGPTViewer instance to use its getBookRecommendations method
-          local chatgpt_viewer = ChatGPTViewer:new {
-            title = _("Recommendations"),
-            text = "",
-            conversation_history = message_history,
-            model = model,
-            temperature = temperature,
-            max_tokens = max_tokens,
-            system_prompt = system_prompt,
-            book_title = title,
-            book_author = author
-          }
-          
-          chatgpt_viewer:getBookRecommendations()
-        end)
-        
-        -- Close loading indicator
-        UIManager:close(loading)
-        
-        -- Show error if failed
-        if not success then
-          UIManager:show(InfoMessage:new{
-            text = _("Error: ") .. tostring(err),
-            timeout = 3
-          })
-        end
-      end
-    })
-  end
+  -- Add feature buttons using helper function
+  addFeatureButton("book_analysis", "Book Analysis", "Analyzing book...", "analyzeBook")
+  addFeatureButton("characters_plot", "Characters & Plot", "Analyzing characters and plot...", "trackCharactersAndPlot")
+  addFeatureButton("discussion", "Discussion", "Generating discussion questions...", "generateDiscussionQuestions")
+  addFeatureButton("recommendations", "Recommendations", "Finding book recommendations...", "getBookRecommendations")
 
   input_dialog = InputDialog:new{
     title = _("Ask a question about the highlighted text"),

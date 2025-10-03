@@ -242,48 +242,19 @@ function ChatGPTViewer:init()
     },
   }
 
-  -- Add book-related features to the main menu instead of a separate section
+  -- Add book features submenu if any features are enabled
   if queryChatGPT then
-    -- Book Analysis
-    if isFeatureEnabled("book_analysis", true) then
+    local has_features = isFeatureEnabled("book_analysis", true) or
+                         isFeatureEnabled("characters_plot", true) or
+                         isFeatureEnabled("discussion", true) or
+                         isFeatureEnabled("recommendations", true)
+
+    if has_features then
       table.insert(default_buttons, {
-        text = _("Book Analysis"),
-        id = "book_analysis",
+        text = _("Book Features"),
+        id = "book_features",
         callback = function()
-          self:analyzeBook()
-        end,
-      })
-    end
-    
-    -- Characters & Plot
-    if isFeatureEnabled("characters_plot", true) then
-      table.insert(default_buttons, {
-        text = _("Characters & Plot"),
-        id = "characters_plot",
-        callback = function()
-          self:trackCharactersAndPlot()
-        end,
-      })
-    end
-    
-    -- Discussion Questions
-    if isFeatureEnabled("discussion", true) then
-      table.insert(default_buttons, {
-        text = _("Discussion"),
-        id = "discussion",
-        callback = function()
-          self:generateDiscussionQuestions()
-        end,
-      })
-    end
-    
-    -- Recommendations
-    if isFeatureEnabled("recommendations", true) then
-      table.insert(default_buttons, {
-        text = _("Recommendations"),
-        id = "recommendations",
-        callback = function()
-          self:getBookRecommendations()
+          self:showBookFeaturesMenu()
         end,
       })
     end
@@ -413,6 +384,58 @@ function ChatGPTViewer:init()
   }
 end
 
+function ChatGPTViewer:showBookFeaturesMenu()
+  local ButtonDialogTitle = require("ui/widget/buttondialogtitle")
+
+  local buttons = {}
+
+  if isFeatureEnabled("book_analysis", true) then
+    table.insert(buttons, {{
+      text = _("Book Analysis"),
+      callback = function()
+        UIManager:close(self.book_features_dialog)
+        self:analyzeBook()
+      end,
+    }})
+  end
+
+  if isFeatureEnabled("characters_plot", true) then
+    table.insert(buttons, {{
+      text = _("Characters & Plot"),
+      callback = function()
+        UIManager:close(self.book_features_dialog)
+        self:trackCharactersAndPlot()
+      end,
+    }})
+  end
+
+  if isFeatureEnabled("discussion", true) then
+    table.insert(buttons, {{
+      text = _("Discussion Questions"),
+      callback = function()
+        UIManager:close(self.book_features_dialog)
+        self:generateDiscussionQuestions()
+      end,
+    }})
+  end
+
+  if isFeatureEnabled("recommendations", true) then
+    table.insert(buttons, {{
+      text = _("Book Recommendations"),
+      callback = function()
+        UIManager:close(self.book_features_dialog)
+        self:getBookRecommendations()
+      end,
+    }})
+  end
+
+  self.book_features_dialog = ButtonDialogTitle:new{
+    title = _("Select a book feature"),
+    buttons = buttons,
+  }
+  UIManager:show(self.book_features_dialog)
+end
+
 function ChatGPTViewer:askAnotherQuestion()
   local input_dialog
   input_dialog = InputDialog:new {
@@ -433,11 +456,18 @@ function ChatGPTViewer:askAnotherQuestion()
           is_enter_default = true,
           callback = function()
             local input_text = input_dialog:getInputText()
-            if input_text and input_text ~= "" then
-              -- Add user message to conversation history
-              table.insert(self.conversation_history, {role = "user", content = input_text})
-              self:onAskQuestion(input_text, self.conversation_history)
+
+            -- Validate empty input
+            if not input_text or input_text:match("^%s*$") then
+              UIManager:show(Notification:new {
+                text = _("Please enter a question."),
+              })
+              return
             end
+
+            -- Add user message to conversation history
+            table.insert(self.conversation_history, {role = "user", content = input_text})
+            self:onAskQuestion(input_text, self.conversation_history)
             UIManager:close(input_dialog)
           end,
         },
@@ -543,11 +573,18 @@ function ChatGPTViewer:showSettings()
         {
           text = _("Clear History"),
           callback = function()
-            self.conversation_history = {}
-            UIManager:show(Notification:new {
-              text = _("Conversation history cleared."),
+            local ConfirmBox = require("ui/widget/confirmbox")
+            UIManager:show(ConfirmBox:new{
+              text = _("Are you sure you want to clear the conversation history? This cannot be undone."),
+              ok_text = _("Clear"),
+              ok_callback = function()
+                self.conversation_history = {}
+                UIManager:show(Notification:new {
+                  text = _("Conversation history cleared."),
+                })
+                UIManager:close(settings_dialog)
+              end,
             })
-            UIManager:close(settings_dialog)
           end,
         },
         {
@@ -556,8 +593,29 @@ function ChatGPTViewer:showSettings()
           callback = function()
             local fields = settings_dialog:getFields()
             self.model = fields[1]
-            self.temperature = tonumber(fields[2]) or 0.7
-            self.max_tokens = tonumber(fields[3]) or 1024
+
+            -- Validate temperature (0.0-2.0)
+            local temp = tonumber(fields[2])
+            if temp and temp >= 0 and temp <= 2 then
+              self.temperature = temp
+            else
+              UIManager:show(Notification:new {
+                text = _("Invalid temperature. Using default 0.7. Valid range: 0.0-2.0"),
+              })
+              self.temperature = 0.7
+            end
+
+            -- Validate max_tokens (must be positive)
+            local tokens = tonumber(fields[3])
+            if tokens and tokens > 0 then
+              self.max_tokens = tokens
+            else
+              UIManager:show(Notification:new {
+                text = _("Invalid max tokens. Using default 1024. Must be > 0"),
+              })
+              self.max_tokens = 1024
+            end
+
             self.system_prompt = fields[4]
             
             -- Add system message at the beginning if history is empty
@@ -573,7 +631,7 @@ function ChatGPTViewer:showSettings()
               end
             end
             
-            -- Save feature settings
+            -- Save feature settings (only if CONFIGURATION exists)
             if CONFIGURATION then
               if not CONFIGURATION.features then
                 CONFIGURATION.features = {}
@@ -581,44 +639,11 @@ function ChatGPTViewer:showSettings()
               if not CONFIGURATION.features.advanced_features then
                 CONFIGURATION.features.advanced_features = {}
               end
-              
+
               CONFIGURATION.features.advanced_features.book_analysis = book_analysis_enabled
               CONFIGURATION.features.advanced_features.characters_plot = characters_plot_enabled
               CONFIGURATION.features.advanced_features.discussion = discussion_enabled
               CONFIGURATION.features.advanced_features.recommendations = recommendations_enabled
-              
-              -- Save configuration to file
-              local file = io.open("configuration.lua", "w")
-              if file then
-                file:write("local CONFIGURATION = {\n")
-                file:write("    api_key = \"" .. (CONFIGURATION.api_key or "") .. "\",\n")
-                file:write("    model = \"" .. (CONFIGURATION.model or "gpt-4o-mini") .. "\",\n")
-                file:write("    base_url = \"" .. (CONFIGURATION.base_url or "https://api.openai.com/v1/chat/completions") .. "\",\n")
-                file:write("    additional_parameters = {},\n")
-                file:write("    features = {\n")
-                
-                -- Write custom prompts
-                file:write("        custom_prompts = {\n")
-                if CONFIGURATION.features.custom_prompts then
-                  for name, prompt in pairs(CONFIGURATION.features.custom_prompts) do
-                    file:write("            " .. name .. " = \"" .. prompt:gsub("\"", "\\\"") .. "\",\n")
-                  end
-                end
-                file:write("        },\n")
-                
-                -- Write advanced features
-                file:write("        advanced_features = {\n")
-                file:write("            book_analysis = " .. tostring(book_analysis_enabled) .. ",\n")
-                file:write("            characters_plot = " .. tostring(characters_plot_enabled) .. ",\n")
-                file:write("            discussion = " .. tostring(discussion_enabled) .. ",\n")
-                file:write("            recommendations = " .. tostring(recommendations_enabled) .. "\n")
-                file:write("        }\n")
-                
-                file:write("    }\n")
-                file:write("}\n\n")
-                file:write("return CONFIGURATION\n")
-                file:close()
-              end
             end
             
             UIManager:show(Notification:new {
@@ -831,12 +856,15 @@ end
 function ChatGPTViewer:saveConversationToFile(filename)
   local DocumentRegistry = require("document/documentregistry")
   local lfs = require("libs/libkoreader-lfs")
-  
+
+  -- Sanitize filename to prevent path traversal
+  filename = filename:gsub("[/\\%.]+", "_")
+
   -- Ensure filename has .txt extension
   if not filename:match("%.txt$") then
     filename = filename .. ".txt"
   end
-  
+
   -- Get documents path
   local documents_dir = G_reader_settings:readSetting("home_dir") or lfs.currentdir()
   local full_path = documents_dir .. "/" .. filename
