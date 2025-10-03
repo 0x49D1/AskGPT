@@ -18,17 +18,14 @@ function AskGPT:init()
       text = _("Ask ChatGPT"),
       enabled = Device:hasClipboard(),
       callback = function()
-        -- Check if network is available
-        if not NetworkMgr:isOnline() then
+        NetworkMgr:runWhenOnline(function()
+          showChatGPTDialog(self.ui, _reader_highlight_instance.selected_text.text)
+        end, function()
+          -- Show message when network is not available
           UIManager:show(InfoMessage:new{
             text = _("Network connection required. Please connect to the internet and try again."),
             timeout = 3
           })
-          return
-        end
-
-        NetworkMgr:runWhenOnline(function()
-          showChatGPTDialog(self.ui, _reader_highlight_instance.selected_text.text)
         end)
       end,
     }
