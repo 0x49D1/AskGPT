@@ -9,7 +9,18 @@ local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
 local json = require("json")
 
-local queryChatGPT = require("gpt_query")
+local queryChatGPT
+do
+  local ok, module_or_err = pcall(function() return require("gpt_query") end)
+  if ok and type(module_or_err) == "function" then
+    queryChatGPT = module_or_err
+  else
+    print("Error loading gpt_query: " .. tostring(module_or_err))
+    queryChatGPT = function()
+      return _("Error: AskGPT service unavailable. Check gpt_query.lua")
+    end
+  end
+end
 
 -- Add a global history table to store conversations
 local HISTORY = {}
@@ -180,6 +191,10 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     -- Use the conversation history from the viewer if provided
     local history_to_use = conversation_history or message_history
 
+    if chatgpt_viewer and chatgpt_viewer.setBusy then
+      chatgpt_viewer:setBusy(true)
+    end
+
     -- Add the new question to the history
     table.insert(history_to_use, {
       role = "user",
@@ -209,6 +224,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
       })
       -- Remove the question from history since API failed
       table.remove(history_to_use)
+      if chatgpt_viewer and chatgpt_viewer.setBusy then
+        chatgpt_viewer:setBusy(false)
+      end
       return
     end
 
@@ -221,6 +239,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     local result_text = createResultText(highlightedText, history_to_use)
 
     -- Update the viewer with the new text and pass the updated history
+    if chatgpt_viewer and chatgpt_viewer.setBusy then
+      chatgpt_viewer:setBusy(false)
+    end
     chatgpt_viewer:update(result_text)
 
     -- Save to history
@@ -250,9 +271,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
         end
 
         UIManager:close(input_dialog)
-        showLoadingDialog()
-
-        UIManager:scheduleIn(0.1, function()
+        UIManager:scheduleIn(0.0, function()
           local context_message = {
             role = "user",
             content = "I'm reading something titled '" .. title .. "' by " .. author .. 
@@ -302,10 +321,12 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             max_tokens = max_tokens,
             system_prompt = system_prompt,
             book_title = title,
-            book_author = author
+            book_author = author,
+            endpoint = (CONFIGURATION and CONFIGURATION.base_url) or "https://api.openai.com/v1/chat/completions",
           }
 
           UIManager:show(chatgpt_viewer)
+          chatgpt_viewer:setBusy(false)
 
           -- Save to history
           saveToHistory(_("AskGPT"), result_text, message_history)
@@ -341,7 +362,8 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             max_tokens = max_tokens,
             system_prompt = system_prompt,
             book_title = title,
-            book_author = author
+            book_author = author,
+            endpoint = (CONFIGURATION and CONFIGURATION.base_url) or "https://api.openai.com/v1/chat/completions",
           }
           UIManager:show(chatgpt_viewer)
         end,
@@ -450,7 +472,8 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             max_tokens = max_tokens,
             system_prompt = prompt,
             book_title = title,
-            book_author = author
+            book_author = author,
+            endpoint = (CONFIGURATION and CONFIGURATION.base_url) or "https://api.openai.com/v1/chat/completions",
           }
 
           UIManager:show(chatgpt_viewer)
@@ -525,7 +548,8 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
               max_tokens = max_tokens,
               system_prompt = system_prompt,
               book_title = title,
-              book_author = author
+              book_author = author,
+              endpoint = (CONFIGURATION and CONFIGURATION.base_url) or "https://api.openai.com/v1/chat/completions",
             }
 
             if chatgpt_viewer and chatgpt_viewer[viewer_method] then

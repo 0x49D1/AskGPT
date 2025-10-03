@@ -1,7 +1,7 @@
 local CONFIGURATION = {
     api_key = "YOUR_API_KEY",
     model = "gpt-4o-mini",
-    base_url = "https://api.openai.com/v1/chat/completions",
+    base_url = "https://api.openai.com/v1/chat/completions", -- use https://api.openai.com/v1/responses for gpt-5-* models
     additional_parameters = {},
     features = {
         custom_prompts = {

@@ -12,7 +12,6 @@ local BD = require("ui/bidi")
 local Blitbuffer = require("ffi/blitbuffer")
 local ButtonTable = require("ui/widget/buttontable")
 local CenterContainer = require("ui/widget/container/centercontainer")
-local CheckButton = require("ui/widget/checkbutton")
 local Device = require("device")
 local Geom = require("ui/geometry")
 local Font = require("ui/font")
@@ -38,10 +37,10 @@ local queryChatGPT = nil
 local CONFIGURATION = nil
 
 local success, result = pcall(function() return require("gpt_query") end)
-if success then
+if success and type(result) == "function" then
   queryChatGPT = result
 else
-  print("gpt_query.lua not found, advanced features will be disabled")
+  print("gpt_query.lua failed to load or returned unexpected value")
 end
 
 -- Try to load configuration
@@ -108,7 +107,68 @@ local ChatGPTViewer = InputContainer:extend {
   system_prompt = "You are a helpful assistant.", -- Default system prompt
   book_title = nil,
   book_author = nil,
+  is_busy = false,
+  endpoint = nil,
+  status_label = nil,
 }
+
+function ChatGPTViewer:buildStatusLine()
+  local parts = {}
+  table.insert(parts, string.format("Model: %s", self.model or "gpt-3.5-turbo"))
+  table.insert(parts, string.format("Tokens: %d", self.max_tokens or 1024))
+  if self.temperature then
+    table.insert(parts, string.format("Temp: %.2f", self.temperature))
+  end
+  if self.endpoint then
+    local endpoint_hint = self.endpoint:match("/responses") and _("Responses API") or _("Chat Completions")
+    table.insert(parts, _("Endpoint: ") .. endpoint_hint)
+  end
+  if self.is_busy then
+    table.insert(parts, _("Waiting for response…"))
+  end
+  return table.concat(parts, "  ·  ")
+end
+
+function ChatGPTViewer:updateStatusLabel()
+  if self.status_label then
+    self.status_label:setText(self:buildStatusLine())
+    self.status_label:refresh()
+  end
+end
+
+function ChatGPTViewer:setBusy(state)
+  state = state and true or false
+  if self.is_busy == state then
+    return
+  end
+  self.is_busy = state
+  self:updateStatusLabel()
+
+  if not self.button_table then
+    return
+  end
+
+  local controllable_ids = {
+    "ask_another_question",
+    "book_features",
+    "settings",
+    "export",
+    "top",
+    "bottom",
+  }
+
+  for _, id in ipairs(controllable_ids) do
+    local button = self.button_table:getButtonById(id)
+    if button then
+      if self.is_busy then
+        button:disable()
+      else
+        button:enable()
+      end
+      button:refresh()
+    end
+  end
+end
 
 function ChatGPTViewer:init()
   -- calculate window dimension
@@ -237,7 +297,9 @@ function ChatGPTViewer:init()
       text = _("Ask Another Question"),
       id = "ask_another_question",
       callback = function()
-        self:askAnotherQuestion()
+        if not self.is_busy then
+          self:askAnotherQuestion()
+        end
       end,
     },
   }
@@ -265,7 +327,9 @@ function ChatGPTViewer:init()
     text = _("Settings"),
     id = "settings",
     callback = function()
-      self:showSettings()
+      if not self.is_busy then
+        self:showSettings()
+      end
     end,
   })
 
@@ -273,7 +337,9 @@ function ChatGPTViewer:init()
     text = _("Export"),
     id = "export",
     callback = function()
-      self:exportConversation()
+      if not self.is_busy then
+        self:exportConversation()
+      end
     end,
   })
 
@@ -281,7 +347,9 @@ function ChatGPTViewer:init()
     text = "⇱",
     id = "top",
     callback = function()
-      self.scroll_text_w:scrollToTop()
+      if not self.is_busy then
+        self.scroll_text_w:scrollToTop()
+      end
     end,
     hold_callback = self.default_hold_callback,
     allow_hold_when_disabled = true,
@@ -291,7 +359,9 @@ function ChatGPTViewer:init()
     text = "⇲",
     id = "bottom",
     callback = function()
-      self.scroll_text_w:scrollToBottom()
+      if not self.is_busy then
+        self.scroll_text_w:scrollToBottom()
+      end
     end,
     hold_callback = self.default_hold_callback,
     allow_hold_when_disabled = true,
@@ -437,6 +507,10 @@ function ChatGPTViewer:showBookFeaturesMenu()
 end
 
 function ChatGPTViewer:askAnotherQuestion()
+  if self.is_busy then
+    return
+  end
+
   local input_dialog
   input_dialog = InputDialog:new {
     title = _("Ask another question"),
@@ -458,18 +532,22 @@ function ChatGPTViewer:askAnotherQuestion()
             local input_text = input_dialog:getInputText()
 
             -- Validate empty input
-            if not input_text or input_text:match("^%s*$") then
-              UIManager:show(Notification:new {
-                text = _("Please enter a question."),
-              })
-              return
-            end
+          if not input_text or input_text:match("^%s*$") then
+            UIManager:show(Notification:new {
+              text = _("Please enter a question."),
+            })
+            return
+          end
 
-            -- Add user message to conversation history
-            table.insert(self.conversation_history, {role = "user", content = input_text})
-            self:onAskQuestion(input_text, self.conversation_history)
-            UIManager:close(input_dialog)
-          end,
+          if self.is_busy then
+            return
+          end
+
+          -- Add user message to conversation history
+          table.insert(self.conversation_history, {role = "user", content = input_text})
+          self:onAskQuestion(input_text, self.conversation_history)
+          UIManager:close(input_dialog)
+        end,
         },
       },
     },
@@ -480,60 +558,7 @@ end
 
 function ChatGPTViewer:showSettings()
   local MultiInputDialog = require("ui/widget/multiinputdialog")
-  local CheckButton = require("ui/widget/checkbutton")
-  local VerticalGroup = require("ui/widget/verticalgroup")
-  local VerticalSpan = require("ui/widget/verticalspan")
-  local HorizontalGroup = require("ui/widget/horizontalgroup")
-  local FrameContainer = require("ui/widget/container/framecontainer")
-  local TextBoxWidget = require("ui/widget/textboxwidget")
-  local Size = require("ui/size")
-  local Font = require("ui/font")
-  
-  -- Get current feature settings
-  local book_analysis_enabled = isFeatureEnabled("book_analysis", true)
-  local characters_plot_enabled = isFeatureEnabled("characters_plot", true)
-  local discussion_enabled = isFeatureEnabled("discussion", true)
-  local recommendations_enabled = isFeatureEnabled("recommendations", true)
-  
-  -- Create checkboxes for features
-  local book_analysis_checkbox = CheckButton:new{
-    text = _("Book Analysis"),
-    checked = book_analysis_enabled,
-    callback = function() book_analysis_enabled = not book_analysis_enabled end,
-  }
-  
-  local characters_plot_checkbox = CheckButton:new{
-    text = _("Characters & Plot"),
-    checked = characters_plot_enabled,
-    callback = function() characters_plot_enabled = not characters_plot_enabled end,
-  }
-  
-  local discussion_checkbox = CheckButton:new{
-    text = _("Discussion"),
-    checked = discussion_enabled,
-    callback = function() discussion_enabled = not discussion_enabled end,
-  }
-  
-  local recommendations_checkbox = CheckButton:new{
-    text = _("Recommendations"),
-    checked = recommendations_enabled,
-    callback = function() recommendations_enabled = not recommendations_enabled end,
-  }
-  
-  -- Create feature settings group
-  local feature_settings = VerticalGroup:new{
-    TextBoxWidget:new{
-      text = _("Enable/Disable Features:"),
-      face = Font:getFace("smallinfofont"),
-      width = self.width * 0.8,
-    },
-    VerticalSpan:new{ width = Size.span.vertical_small },
-    book_analysis_checkbox,
-    characters_plot_checkbox,
-    discussion_checkbox,
-    recommendations_checkbox,
-  }
-  
+
   local settings_dialog
   
   settings_dialog = MultiInputDialog:new {
@@ -555,10 +580,10 @@ function ChatGPTViewer:showSettings()
         label = _("Max tokens:"),
       },
       {
-        text = self.system_prompt or "You are a helpful assistant.",
-        hint = _("System prompt"),
-        label = _("System prompt:"),
-      },
+      text = self.system_prompt or "You are a helpful assistant.",
+      hint = _("System prompt"),
+      label = _("System prompt:"),
+    },
     },
     width = self.width * 0.8,
     height = self.height * 0.8,
@@ -630,22 +655,9 @@ function ChatGPTViewer:showSettings()
                 table.insert(self.conversation_history, 1, {role = "system", content = self.system_prompt})
               end
             end
-            
-            -- Save feature settings (only if CONFIGURATION exists)
-            if CONFIGURATION then
-              if not CONFIGURATION.features then
-                CONFIGURATION.features = {}
-              end
-              if not CONFIGURATION.features.advanced_features then
-                CONFIGURATION.features.advanced_features = {}
-              end
 
-              CONFIGURATION.features.advanced_features.book_analysis = book_analysis_enabled
-              CONFIGURATION.features.advanced_features.characters_plot = characters_plot_enabled
-              CONFIGURATION.features.advanced_features.discussion = discussion_enabled
-              CONFIGURATION.features.advanced_features.recommendations = recommendations_enabled
-            end
-            
+            self:updateStatusLabel()
+
             UIManager:show(Notification:new {
               text = _("Settings saved."),
             })
@@ -658,19 +670,7 @@ function ChatGPTViewer:showSettings()
       },
     },
   }
-  
-  -- Add feature settings to dialog
-  settings_dialog[1] = VerticalGroup:new{
-    settings_dialog[1],
-    VerticalSpan:new{ width = Size.span.vertical_large },
-    FrameContainer:new{
-      padding = Size.padding.default,
-      margin = Size.margin.small,
-      bordersize = 0,
-      feature_settings,
-    }
-  }
-  
+
   UIManager:show(settings_dialog)
 end
 
@@ -813,7 +813,8 @@ function ChatGPTViewer:update(new_text, is_error)
     max_tokens = self.max_tokens,
     system_prompt = self.system_prompt,
     book_title = self.book_title,
-    book_author = self.book_author
+    book_author = self.book_author,
+    endpoint = self.endpoint,
   }
   updated_viewer.scroll_text_w:scrollToBottom()
   UIManager:show(updated_viewer)
@@ -904,6 +905,8 @@ function ChatGPTViewer:analyzeBook()
     return
   end
   
+  self:setBusy(true)
+  
   local DocumentRegistry = require("document/documentregistry")
   local InfoMessage = require("ui/widget/infomessage")
   local UIManager = require("ui/uimanager")
@@ -959,6 +962,7 @@ function ChatGPTViewer:analyzeBook()
   })
   
   if not success then
+    self:setBusy(false)
     UIManager:show(InfoMessage:new{
       text = _("Error: Failed to get analysis from ChatGPT"),
       timeout = 3
@@ -978,10 +982,12 @@ function ChatGPTViewer:analyzeBook()
     max_tokens = self.max_tokens,
     system_prompt = self.system_prompt,
     book_title = book_title,
-    book_author = book_author
+    book_author = book_author,
+    endpoint = self.endpoint,
   }
   
   UIManager:show(analysis_viewer)
+  self:setBusy(false)
 end
 
 function ChatGPTViewer:trackCharactersAndPlot()
@@ -999,6 +1005,8 @@ function ChatGPTViewer:trackCharactersAndPlot()
     text = _("Analyzing characters and plot..."),
     timeout = 2
   })
+  
+  self:setBusy(true)
   
   -- Get the language from the conversation history
   local detected_language = self:detectLanguage()
@@ -1049,6 +1057,7 @@ function ChatGPTViewer:trackCharactersAndPlot()
   })
   
   if not success then
+    self:setBusy(false)
     UIManager:show(InfoMessage:new{
       text = _("Error: Failed to get character and plot analysis from ChatGPT"),
       timeout = 3
@@ -1068,10 +1077,12 @@ function ChatGPTViewer:trackCharactersAndPlot()
     max_tokens = self.max_tokens,
     system_prompt = self.system_prompt,
     book_title = self.book_title,
-    book_author = self.book_author
+    book_author = self.book_author,
+    endpoint = self.endpoint,
   }
   
   UIManager:show(tracking_viewer)
+  self:setBusy(false)
 end
 
 function ChatGPTViewer:generateDiscussionQuestions()
@@ -1084,6 +1095,8 @@ function ChatGPTViewer:generateDiscussionQuestions()
   
   local UIManager = require("ui/uimanager")
   local InfoMessage = require("ui/widget/infomessage")
+  
+  self:setBusy(true)
   
   -- Get the language from the conversation history
   local detected_language = self:detectLanguage()
@@ -1131,6 +1144,7 @@ function ChatGPTViewer:generateDiscussionQuestions()
   end)
   
   if not success then
+    self:setBusy(false)
     UIManager:show(InfoMessage:new{
       text = _("Error: Failed to get discussion questions from ChatGPT"),
       timeout = 3
@@ -1149,10 +1163,12 @@ function ChatGPTViewer:generateDiscussionQuestions()
     max_tokens = self.max_tokens,
     book_title = self.book_title,
     book_author = self.book_author,
-    conversation_history = self.conversation_history
+    conversation_history = self.conversation_history,
+    endpoint = self.endpoint,
   }
   
   UIManager:show(discussion_viewer)
+  self:setBusy(false)
 end
 
 function ChatGPTViewer:getBookRecommendations()
@@ -1165,6 +1181,8 @@ function ChatGPTViewer:getBookRecommendations()
   
   local UIManager = require("ui/uimanager")
   local InfoMessage = require("ui/widget/infomessage")
+  
+  self:setBusy(true)
   
   -- Get the language from the conversation history
   local detected_language = self:detectLanguage()
@@ -1215,6 +1233,7 @@ function ChatGPTViewer:getBookRecommendations()
   end)
   
   if not success then
+    self:setBusy(false)
     UIManager:show(InfoMessage:new{
       text = _("Error: Failed to get recommendations from ChatGPT"),
       timeout = 3
@@ -1237,10 +1256,12 @@ function ChatGPTViewer:getBookRecommendations()
     model = self.model,
     temperature = self.temperature,
     max_tokens = self.max_tokens,
-    conversation_history = self.conversation_history
+    conversation_history = self.conversation_history,
+    endpoint = self.endpoint,
   }
   
   UIManager:show(rec_viewer)
+  self:setBusy(false)
 end
 
 -- Add this function to detect language from conversation history
