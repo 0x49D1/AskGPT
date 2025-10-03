@@ -82,7 +82,11 @@ else
 end
 
 -- Load history when the module is loaded
-loadHistory()
+local hist_success, hist_err = pcall(loadHistory)
+if not hist_success then
+  print("Warning: Failed to load history: " .. tostring(hist_err))
+  HISTORY = {}
+end
 
 -- Helper function to check if a feature is enabled
 local function isFeatureEnabled(feature_name, default)
@@ -421,9 +425,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
             max_tokens = max_tokens
           })
 
-          if not success or (response and response:match("^Error:")) then
+          if not success or not response or (type(response) == "string" and response:match("^Error:")) then
             UIManager:show(InfoMessage:new{
-              text = response or _("Error: Failed to get response from ChatGPT"),
+              text = type(response) == "string" and response or _("Error: Failed to get response from ChatGPT"),
               timeout = 5
             })
             return
