@@ -50,12 +50,19 @@ local function queryChatGPT(messages, options)
   local additional_params = CONFIGURATION.additional_parameters or {}
 
   -- Prepare the request body
+  -- Use max_completion_tokens for newer models, fallback to max_tokens for compatibility
   local request_body = {
     model = model,
     messages = messages,
     temperature = temperature,
-    max_tokens = max_tokens
   }
+
+  -- Check if model supports max_completion_tokens (gpt-4o and newer)
+  if model:match("^gpt%-4o") or model:match("^gpt%-4%-turbo") or model:match("^gpt%-3.5%-turbo%-0125") then
+    request_body.max_completion_tokens = max_tokens
+  else
+    request_body.max_tokens = max_tokens
+  end
   
   -- Add any additional parameters
   for k, v in pairs(additional_params) do
