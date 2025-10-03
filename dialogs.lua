@@ -310,75 +310,78 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     }
   }
 
+  -- Helper function to show history menu (reusable)
+  local function showHistoryMenu()
+    UIManager:close(input_dialog)
+
+    if #HISTORY == 0 then
+      UIManager:show(InfoMessage:new{
+        text = _("No conversation history available"),
+        timeout = 2
+      })
+      return
+    end
+
+    local menu_items = {}
+    for i, item in ipairs(HISTORY) do
+      table.insert(menu_items, {
+        text = item.title .. " (" .. os.date("%Y-%m-%d %H:%M", item.timestamp) .. ")",
+        callback = function()
+          local chatgpt_viewer = ChatGPTViewer:new {
+            title = item.title,
+            text = item.text,
+            onAskQuestion = handleNewQuestion,
+            conversation_history = item.conversation_history,
+            model = model,
+            temperature = temperature,
+            max_tokens = max_tokens,
+            system_prompt = system_prompt,
+            book_title = title,
+            book_author = author
+          }
+          UIManager:show(chatgpt_viewer)
+        end,
+        hold_callback = function()
+          local ConfirmBox = require("ui/widget/confirmbox")
+          UIManager:show(ConfirmBox:new{
+            text = _("Delete this conversation from history?"),
+            ok_text = _("Delete"),
+            ok_callback = function()
+              table.remove(HISTORY, i)
+              saveHistory()
+              UIManager:show(InfoMessage:new{
+                text = _("Conversation deleted."),
+                timeout = 2
+              })
+              -- Refresh the history menu
+              UIManager:close(history_menu)
+              if #HISTORY > 0 then
+                -- Re-show history if items remain
+                UIManager:scheduleIn(0.3, function()
+                  showHistoryMenu()  -- Re-trigger History menu
+                end)
+              end
+            end,
+          })
+        end
+      })
+    end
+
+    local history_menu = Menu:new{
+      title = _("Conversation History"),
+      item_table = menu_items,
+      is_borderless = true,
+      is_popout = false,
+      width = Screen:getWidth() * 0.8,
+      height = Screen:getHeight() * 0.8,
+    }
+    UIManager:show(history_menu)
+  end
+
   -- Add "History" button to the main dialog
   table.insert(buttons, {
     text = _("History"),
-    callback = function()
-      UIManager:close(input_dialog)
-      
-      if #HISTORY == 0 then
-        UIManager:show(InfoMessage:new{
-          text = _("No conversation history available"),
-          timeout = 2
-        })
-        return
-      end
-      
-      local menu_items = {}
-      for i, item in ipairs(HISTORY) do
-        table.insert(menu_items, {
-          text = item.title .. " (" .. os.date("%Y-%m-%d %H:%M", item.timestamp) .. ")",
-          callback = function()
-            local chatgpt_viewer = ChatGPTViewer:new {
-              title = item.title,
-              text = item.text,
-              onAskQuestion = handleNewQuestion,
-              conversation_history = item.conversation_history,
-              model = model,
-              temperature = temperature,
-              max_tokens = max_tokens,
-              system_prompt = system_prompt,
-              book_title = title,
-              book_author = author
-            }
-            UIManager:show(chatgpt_viewer)
-          end,
-          hold_callback = function()
-            local ConfirmBox = require("ui/widget/confirmbox")
-            UIManager:show(ConfirmBox:new{
-              text = _("Delete this conversation from history?"),
-              ok_text = _("Delete"),
-              ok_callback = function()
-                table.remove(HISTORY, i)
-                saveHistory()
-                UIManager:show(InfoMessage:new{
-                  text = _("Conversation deleted."),
-                  timeout = 2
-                })
-                -- Refresh the history menu
-                UIManager:close(history_menu)
-                if #HISTORY > 0 then
-                  -- Re-show history if items remain
-                  UIManager:scheduleIn(0.3, function()
-                    buttons[3].callback()  -- Re-trigger History button callback
-                  end)
-                end
-              end,
-            })
-          end
-        })
-      end
-      
-      local history_menu = Menu:new{
-        title = _("Conversation History"),
-        item_table = menu_items,
-        is_borderless = true,
-        is_popout = false,
-        width = Screen:getWidth() * 0.8,
-        height = Screen:getHeight() * 0.8,
-      }
-      UIManager:show(history_menu)
-    end
+    callback = showHistoryMenu
   })
 
   -- Add buttons for custom prompts (limit to 5, rest in submenu)
