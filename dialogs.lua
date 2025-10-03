@@ -198,9 +198,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
     })
 
     -- Check if answer is an error
-    if answer:match("^Error:") then
+    if not answer or (type(answer) == "string" and answer:match("^Error:")) then
       UIManager:show(InfoMessage:new{
-        text = answer,
+        text = answer or _("Error: No response from ChatGPT"),
         timeout = 5
       })
       -- Remove the question from history since API failed
@@ -269,9 +269,9 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
           })
 
           -- Check if answer is an error
-          if answer:match("^Error:") then
+          if not answer or (type(answer) == "string" and answer:match("^Error:")) then
             UIManager:show(InfoMessage:new{
-              text = answer,
+              text = answer or _("Error: No response from ChatGPT"),
               timeout = 5
             })
             -- Remove the question messages from history since API failed
