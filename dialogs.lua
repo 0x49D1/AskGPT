@@ -521,7 +521,11 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
               book_author = author
             }
 
-            chatgpt_viewer[viewer_method](chatgpt_viewer)
+            if chatgpt_viewer and chatgpt_viewer[viewer_method] then
+              chatgpt_viewer[viewer_method](chatgpt_viewer)
+            else
+              error("Failed to create ChatGPT viewer or method not found: " .. viewer_method)
+            end
           end)
 
           -- Close loading indicator
