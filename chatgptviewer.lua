@@ -960,11 +960,11 @@ function ChatGPTViewer:analyzeBook()
     temperature = self.temperature,
     max_tokens = self.max_tokens
   })
-  
-  if not success then
+
+  if not success or (type(analysis) == "string" and analysis:match("^Error:")) then
     self:setBusy(false)
     UIManager:show(InfoMessage:new{
-      text = _("Error: Failed to get analysis from ChatGPT"),
+      text = (type(analysis) == "string" and analysis) or _("Error: Failed to get analysis from ChatGPT"),
       timeout = 3
     })
     return
@@ -1055,11 +1055,11 @@ function ChatGPTViewer:trackCharactersAndPlot()
     temperature = 0.7,
     max_tokens = self.max_tokens
   })
-  
-  if not success then
+
+  if not success or (type(tracking_result) == "string" and tracking_result:match("^Error:")) then
     self:setBusy(false)
     UIManager:show(InfoMessage:new{
-      text = _("Error: Failed to get character and plot analysis from ChatGPT"),
+      text = (type(tracking_result) == "string" and tracking_result) or _("Error: Failed to get character and plot analysis from ChatGPT"),
       timeout = 3
     })
     return
@@ -1134,19 +1134,16 @@ function ChatGPTViewer:generateDiscussionQuestions()
   end
   
   -- Query ChatGPT for discussion questions with error handling
-  local discussion_questions = ""
-  local success = pcall(function()
-    discussion_questions = queryChatGPT(discussion_messages, {
-      model = self.model,
-      temperature = 0.8, -- Slightly higher temperature for creative questions
-      max_tokens = self.max_tokens
-    })
-  end)
-  
-  if not success then
+  local success, discussion_questions = pcall(queryChatGPT, discussion_messages, {
+    model = self.model,
+    temperature = 0.8, -- Slightly higher temperature for creative questions
+    max_tokens = self.max_tokens
+  })
+
+  if not success or (type(discussion_questions) == "string" and discussion_questions:match("^Error:")) then
     self:setBusy(false)
     UIManager:show(InfoMessage:new{
-      text = _("Error: Failed to get discussion questions from ChatGPT"),
+      text = (type(discussion_questions) == "string" and discussion_questions) or _("Error: Failed to get discussion questions from ChatGPT"),
       timeout = 3
     })
     return
@@ -1223,19 +1220,16 @@ function ChatGPTViewer:getBookRecommendations()
   end
   
   -- Query ChatGPT for recommendations with error handling
-  local recommendations = ""
-  local success = pcall(function()
-    recommendations = queryChatGPT(rec_messages, {
-      model = self.model,
-      temperature = 0.7,
-      max_tokens = self.max_tokens
-    })
-  end)
-  
-  if not success then
+  local success, recommendations = pcall(queryChatGPT, rec_messages, {
+    model = self.model,
+    temperature = 0.7,
+    max_tokens = self.max_tokens
+  })
+
+  if not success or (type(recommendations) == "string" and recommendations:match("^Error:")) then
     self:setBusy(false)
     UIManager:show(InfoMessage:new{
-      text = _("Error: Failed to get recommendations from ChatGPT"),
+      text = (type(recommendations) == "string" and recommendations) or _("Error: Failed to get recommendations from ChatGPT"),
       timeout = 3
     })
     return

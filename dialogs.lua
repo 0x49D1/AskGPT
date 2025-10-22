@@ -347,6 +347,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
       return
     end
 
+    local history_menu  -- Declare before use in callbacks
     local menu_items = {}
     for i, item in ipairs(HISTORY) do
       table.insert(menu_items, {
@@ -393,7 +394,7 @@ local function showChatGPTDialog(ui, highlightedText, message_history)
       })
     end
 
-    local history_menu = Menu:new{
+    history_menu = Menu:new{
       title = _("Conversation History"),
       item_table = menu_items,
       is_borderless = true,
